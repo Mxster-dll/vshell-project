@@ -1,0 +1,35 @@
+# ===== Flutter / Dart 工程 =====
+.dart_tool/
+.idea/
+*.iml
+.metadata
+.flutter-plugins-dependencies
+
+# ===== 构建产物 =====
+build/
+windows/flutter/ephemeral/
+*.apk
+*.aab
+
+# ===== 探针/调试残留（开发截图、日志、临时脚本）=====
+_*.png
+_*.webp
+_*.jpg
+_*.log
+_*.txt
+_*.py
+_*.ps1
+_*.cjs
+_*.html
+_*.css
+*.log
+mem_mon*.log
+
+# ===== 开发残留 =====
+vshell/output
+
+# ===== 隐私数据源插件（用户私有，不入库）=====
+vshell-flutter/kkav.js
+vshell-flutter/kkav-diag2.js
+vshell-flutter/hlstest.js
+vshell-flutter/vshell-test-source.js

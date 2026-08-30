@@ -1,0 +1,3544 @@
+/* ============================================================
+ * components — 导航栏 / 视频卡片 / 播放器 / 悬浮胶囊 / toast / 弹窗 / 空态
+ * mimic: 卡片几何沿用 vscode-modern-ui（8px 圆角 / 6-8px 间距 / 浮动阴影）
+ *        取色一律 var(--vscode-*)；收藏红用 --vscode-errorForeground 语义
+ * ============================================================ */
+
+/* ---------- 导航栏 ---------- */
+.vshell-navbar {
+  position: fixed;                   /* 悬浮导航（用户需求）：不占文档流，
+                                        半透明毛玻璃浮在内容上方，滚动时内容从底下穿过 */
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  height: 56px;              /* v0.3.35：导航栏增高 52→56（用户需求） */
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: rgba(24, 24, 24, 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: none;                  /* 常驻无框线（用户需求）：仅页面非顶端时阴影 */
+  transition: box-shadow 150ms ease;
+}
+/* 页面滚动（不处于顶端）时悬浮阴影（用户需求）——navbar.js scroll 监听加类 */
+.vshell-navbar.is-scrolled {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+.vshell.theme-light .vshell-navbar {
+  background: rgba(255, 255, 255, 0.85);
+}
+.vshell-nav-home {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--vscode-foreground);
+  transition: background 120ms ease, transform 120ms ease;
+}
+.vshell-nav-home .codicon {
+  font-size: 18px;
+  line-height: 1;
+}
+.vshell-nav-home:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+  transform: scale(1.06);
+}
+.vshell-nav-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  padding-right: 6px;
+}
+.vshell-nav-brand-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--vscode-activityBarBadge-background);
+  box-shadow: 0 0 8px var(--vscode-activityBarBadge-background);
+}
+.vshell-nav-brand-ver {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.8;
+}
+/* 中部组合水平居中（用户需求：主页按钮在搜索框左侧、整体居中于 navbar）；
+   右侧按钮组用 margin-left:auto 推至最右（center 脱离文档流不占位） */
+.vshell-nav-center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vshell-nav-search {
+  position: relative;          /* 弹出浮层的定位上下文（覆盖自身位置） */
+  width: min(520px, 44vw);
+  height: 30px;                /* 固定高：v0.3.41 浮层方案——打开时内容移入浮层，
+                                  搜索框空载仍保持原高度（浮层覆盖位置不偏移） */
+  box-sizing: border-box;      /* v0.3.41：padding 计入高度——视觉高度不变 */
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* v0.3.41 用户需求（澄清）：上 padding 常态为 0（原样），仅激活
+     （浮层 head）时为 3px；左 3px 保持（上一轮需求）、右 6px 保持 */
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: 8px;
+  padding: 0 6px 0 3px;
+  transition: width 160ms ease;
+}
+/* 悬停（未激活）：背景变深 #181818（用户需求） */
+.vshell-nav-search:hover {
+  background: #181818;
+}
+/* v0.3.59 用户需求：未展开（未聚焦）且编辑器内有胶囊时，背景也改为 #181818
+   （与悬停态一致；聚焦时浮层展开盖住搜索框，此规则不参与） */
+.vshell-nav-search:not(:focus-within):has(.vshell-st-chip) {
+  background: #181818;
+}
+/* 聚焦：不改变边框颜色（用户需求：激活后不要变边框）——不再画 focusBorder 高亮 */
+.vshell-nav-search:focus-within {
+  border-color: var(--vscode-input-border, var(--vscode-panel-border));
+  box-shadow: none;
+}
+/* 胶囊编辑器（v0.3.26：多输入框模型——[输入框][胶囊][输入框]...交替；
+   样式全透明不画自身边框/背景，由容器统一提供；胶囊横向排列可横向滚动） */
+.vshell .vshell-st-editor {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 0;              /* v0.3.27：胶囊/输入框间距归零（窄输入框自身 8px 即视觉空隙） */
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: transparent;
+  border: none;
+  outline: none;
+  border-radius: 0;
+  padding: 0 6px 0 0;      /* v0.3.31：去除左 padding（用户需求）——内容从容器 padding 后直接开始 */
+  box-shadow: none;
+  cursor: text;
+  white-space: nowrap;
+}
+.vshell .vshell-st-editor::-webkit-scrollbar { display: none; }
+/* 输入框：中间 = 0 宽（盒子内居中，v0.3.28），输入时 JS 扩展；
+   末尾（.is-last）= 自适应宽度（flex:1） */
+.vshell .vshell-st-input {
+  flex: none;
+  width: 1px;              /* v0.3.30：默认 1px（原 0——用户需求），输入时 JS 扩展 */
+  min-width: 0;
+  height: 22px;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  caret-color: var(--vscode-foreground);
+}
+.vshell .vshell-st-input.is-last {
+  flex: 1;
+  width: auto;
+  min-width: 60px;
+}
+/* v0.3.28/0.3.29：输入框盒子——中间盒子 = 胶囊间空隙（input 0 宽居中，
+   点击盒子聚焦）；末尾盒子 flex:1 且盒内 input 占满全宽；
+   v0.3.41 用户需求：首盒子平时左右 padding 0、光标移入（hover/聚焦）
+   才变 3px；其他盒子常态 2px；padding 变化导致胶囊位移——120ms 过渡动画 */
+.vshell-st-box {
+  flex: none;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 2px;                 /* 其他盒子常态 2px（原 3px） */
+  cursor: text;
+  transition: padding 120ms ease; /* 胶囊位移动画（用户需求） */
+}
+/* 首盒子（编辑器第一个子元素）：平时 0 padding（内容贴左），
+   hover/聚焦时才放大到 3px（插入点空间提示）——
+   特异性 (0,3,0) 压过下方通用 hover 规则（0,2,0） */
+.vshell-st-box:first-child {
+  padding: 0;
+}
+.vshell-st-box:first-child:hover,
+.vshell-st-box:first-child:focus-within {
+  padding: 0 3px;
+}
+/* v0.3.41 用户需求：中间盒子 hover/聚焦 → 4px（常态 2px）——
+   胶囊间隙随光标移入放大，位移有 120ms 过渡 */
+.vshell-st-box:hover,
+.vshell-st-box:focus-within {
+  padding: 0 4px;
+}
+.vshell-st-box.is-last {
+  flex: 1;
+  min-width: 0;
+}
+.vshell-st-box.is-last .vshell-st-input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+}
+/* v0.3.27：输入框聚焦零高亮——base.css `.vshell input:focus` 的 focusBorder
+   box-shadow 会画出高亮框；输入框要全透明、存在感越低越好（用户需求） */
+.vshell .vshell-st-input:focus {
+  box-shadow: none;
+  outline: none;
+  border: none;
+  background: transparent;
+}
+/* v0.3.35：占位提示已移除（用户需求：搜索框空着即可）——
+   .is-empty / .is-focused 类保留（结构语义，无视觉效果） */
+/* 胶囊：不可编辑、pill 形；v0.3.26 多输入框模型——胶囊两侧都是输入框，
+   取消 margin（v0.3.24 的 2px 防遮光标已不再需要——用户需求）；
+   v0.3.41 position:relative——右上角删除按钮的定位上下文 */
+.vshell .vshell-st-chip {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;   /* v0.3.58 用户需求：6px 圆角（原 cornerRadius-large 8px） */
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  line-height: 1;
+  user-select: none;
+  cursor: default;
+}
+.vshell .vshell-st-chip-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* v0.3.41 用户需求：胶囊悬停时右上角圆形删除按钮——绝对定位骑跨胶囊
+   右上角（压住边框，参考主流平台删除历史记录 UI）；12px 圆钮（v0.3.41
+   用户：圆框缩小），× 图标 8px（≈ 圆径 60%，参照用户提供的 1024 viewBox
+   删除 SVG 笔画比例）；top/right -4px：顶部溢出 4px = 编辑器垂直留白
+   （胶囊 22px 居中于 30px 编辑器，恰好不裁），右侧溢出 4px 落在后邻
+   输入框盒子区（透明，可见）；默认隐藏，悬停胶囊显示；移动端常驻 */
+.vshell .vshell-st-chip-del {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 12px;                 /* v0.3.66 回退：v0.3.64 改错对象，恢复原 12px */
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0;
+  border: 1px solid var(--vscode-sideBar-border);
+  border-radius: 50%;
+  background: var(--vscode-input-background);
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  opacity: 0;
+  z-index: 2;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+.vshell .vshell-st-chip:hover .vshell-st-chip-del,
+.vshell .vshell-st-chip-del:focus-visible {
+  opacity: 1;
+}
+.vshell .vshell-st-chip-del:hover {
+  background: var(--vscode-errorForeground);
+  border-color: transparent;
+  color: #fff;
+}
+.vshell .vshell-st-chip-del .codicon { font-size: 8px; }   /* v0.3.66 回退：恢复原 8px */
+@media (hover: none) {
+  .vshell .vshell-st-chip-del { opacity: 1; }
+}
+/* 搜索按钮：独立四面圆角小按钮（用户需求 20x20），不贴边 */
+.vshell .vshell-nav-search-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 5px;                  /* 四面圆角 */
+  background: transparent;
+  color: var(--vscode-input-foreground);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.vshell-nav-search-btn:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+.vshell-nav-search-btn .codicon {
+  font-size: 12px;
+}
+/* ===== 搜索浮层（v0.3.41 用户拍板：放弃拼接，走覆盖路线） =====
+ * 聚焦搜索框 → 弹出整体浮层覆盖原搜索框位置（absolute relative searchBox，
+ * v0.3.53 用户需求：覆盖卡片回退到「无外延」版本——不再左右/上下外扩，
+ *  与搜索框等宽对齐（-1px 抵消 searchBox 自身 1px 边框的视觉偏差）；
+ *  3px 全 padding（v0.3.43）、盒子包裹（v0.3.44+，v0.3.54 去除）、
+ *  圆角 11px（v0.3.45）。
+ *  v0.3.55 用户需求：去除上 padding（编辑器顶贴近搜索框位置，视觉无缝）；
+ *  圆角 -3px 回退到 cornerRadius-large（8px，外延已回退无需 +3 补偿） */
+.vshell-nav-popover {
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  right: -1px;
+  padding: 0 3px 3px;          /* v0.3.55：无上 padding，左右下 3px */
+  z-index: 100;               /* 盖住原搜索框与导航栏其余元素 */
+  background: var(--vscode-surface-background);
+  border: 1px solid var(--vscode-sideBar-border);
+  border-radius: var(--vscode-cornerRadius-large);   /* v0.3.55：8px（-3px 回退） */
+  box-shadow: var(--vscode-shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--vscode-spacing-size60);   /* v0.3.57 用户需求：head 与 body 之间加间距（6px） */
+  animation: vshell-pop-in 140ms ease;
+}
+.vshell-nav-popover-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* v0.3.43：head 不再自带 padding——3px 全 padding 由卡片承担。
+     v0.3.54：内搜索框外包盒子已去除（用户需求）——控件直接放 head */
+  padding: 0;
+}
+/* 浮层内搜索框静态化：外观由浮层统一提供（无边框无背景无定位）——
+   特异性 0,3,0 压过 .vshell-nav-search 主规则（含 hover/focus-within） */
+.vshell-nav-popover .vshell-nav-search {
+  position: static;
+  width: 100%;
+  height: auto;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+}
+/* v0.3.41 用户需求：浮层消失动画——与出现动画（pop-in 140ms）对称的
+   淡出上移（pop-out 140ms），关闭时先播动画再移除元素 */
+.vshell-nav-popover-leaving {
+  animation: vshell-pop-out 140ms ease forwards;
+}
+@keyframes vshell-pop-out {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(-4px); }
+}
+.vshell-nav-popover-body {
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+}
+
+/* ===== 搜索标签面板（v0.3.41：只在浮层 body 内渲染——静态化正常流，
+ * 外观由浮层统一提供；v0.3.41 用户需求：head 与 body 之间无分割线） ===== */
+.vshell-nav-tagpop {
+  position: static;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;                 /* v0.3.56 用户需求：去除所有 padding */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vshell-nav-tagpop-sec + .vshell-nav-tagpop-sec {
+  border-top: 1px solid var(--vscode-sideBar-border);
+  padding-top: 8px;
+}
+@keyframes vshell-pop-in {
+  /* v0.3.47 用户需求：展开动画不要有位移，直接淡化 */
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.vshell-nav-tagpop-title {
+  font-size: var(--vscode-fontSize-label2);
+  color: var(--vscode-descriptionForeground);
+}
+.vshell-nav-tagpop-empty {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  line-height: 1.5;
+}
+.vshell-nav-tagpop-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.vshell-nav-tagpop-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 10px 0 5px;     /* + 号紧贴左缘（v0.3.25：用户反馈 + 号偏右） */
+  border: 1px solid var(--vscode-sideBar-border);
+  border-radius: 6px;   /* v0.3.58 用户需求：6px 圆角（原 cornerRadius-large 8px） */
+  background: var(--vscode-toolbar-hoverBackground);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.vshell-nav-tagpop-chip:hover {
+  background: var(--vscode-list-hoverBackground);
+  border-color: var(--vscode-focusBorder);
+}
+.vshell-nav-tagpop-chip-name {
+  font-size: 12px;
+  color: var(--vscode-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* v0.3.25：清空按钮（×）+ VS Code Modern 分隔竖线（搜索按钮左侧）：
+   竖线 = 1px sideBar-border 短竖线（mimic: VS Code 工具栏分隔线，
+   toolbar-separatorBackground 同类语义，取 sideBar-border 更稳定）；
+   v0.3.41 用户需求：未激活（无浮层）时清空按钮与分隔竖线均不显示
+   （display:none），浮层（激活）内显示 */
+.vshell .vshell-nav-clear {
+  display: none;
+}
+/* v0.3.62 用户需求：恢复清空/搜索按钮间竖分割线——未激活同样隐藏 */
+.vshell .vshell-nav-divider {
+  display: none;
+}
+.vshell-nav-popover .vshell-nav-clear {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;                 /* v0.3.65 用户需求：缩小清除按钮 ×（原 18px） */
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+  margin-right: 3px;           /* v0.3.70 用户需求：清除按钮右 margin 3px */
+}
+.vshell-nav-popover .vshell-nav-clear:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-errorForeground);
+}
+.vshell-nav-popover .vshell-nav-clear .codicon { font-size: 8px; }   /* v0.3.66 用户需求：图标改 8px（原 10px） */
+/* v0.3.62 恢复竖分割线；v0.3.63/64/65 提亮三连无效——v0.3.66 探针锁定
+   真根因：浮层内规则从未声明 display，元素恒 display:none 不渲染，
+   补 display:block 后首次真实渲染。v0.3.67 用户需求：回退样式到 v0.3.25
+   历史做法（1px × 16px、background sideBar-border；注释原文：mimic:
+   VS Code 工具栏分隔线，toolbar-separatorBackground 同类语义，
+   取 sideBar-border 更稳定） */
+.vshell-nav-popover .vshell-nav-divider {
+  display: block;             /* v0.3.66 关键修复：压过 .vshell .vshell-nav-divider{display:none}（同特异性后写） */
+  flex: none;
+  width: 1px;
+  height: 16px;
+  background: var(--vscode-sideBar-border);
+  margin: 0 3px 0 0;          /* v0.3.69 用户需求：分割线只要左 margin，右 margin 为 0 */
+}
+/* v0.3.62 用户需求：展开后搜索按钮悬浮高亮范围太大——浮层内恢复 20x20
+   （与未展开搜索框内按钮一致），圆角 5px（原 v0.3.48 的 30x30 等高）；
+   v0.3.68 用户需求：搜索按钮左右各 3px margin */
+.vshell-nav-popover .vshell-nav-search-btn {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 5px;
+  margin: 0 3px 0 0;          /* v0.3.70 用户需求：搜索按钮只保留右 margin（左取消） */
+}
+/* 下区快捷添加图标（+ 号，蓝） */
+.vshell-nav-tagpop-addicon {
+  color: var(--vscode-charts-blue, #59A4F9);
+  font-size: 12px;
+  flex: none;
+}
+.vshell .vshell-nav-tagpop-chip-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;                 /* v0.3.66 回退：v0.3.62/63 改错对象，恢复原 18px */
+  height: 18px;
+  flex: none;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.vshell-nav-tagpop-chip-del:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-errorForeground);
+}
+.vshell-nav-tagpop-chip-del .codicon {
+  font-size: 12px;             /* v0.3.66 回退：恢复原 12px */
+}
+.vshell .vshell-nav-tagpop-clear {
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.vshell-nav-tagpop-clear:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-errorForeground);
+}
+/* .vshell 前缀（0,2,0）：压过 base.css .vshell button { padding: 0 }（0,1,1）——
+   v0.3.51 修复：布局/深浅色按钮是 <button>，padding 被归零 → hover 高亮只剩
+   图标宽（竖直条），无水平扩展（用户反馈） */
+.vshell .vshell-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--vscode-foreground);
+  font-size: 13px;
+  transition: background 120ms ease, color 120ms ease;
+}
+/* 待看按钮（center 之后的第一个 nav-btn）：把按钮组推向右端。
+   按钮组已被包进 .vshell-nav-actions 并挂到 body 直系（navbar 的
+   backdrop-filter 会吞掉 fixed 定位——移动端工具条必须相对视口）——
+   桌面下 actions 自身 fixed top/right 对齐导航栏右端，等价原布局 */
+.vshell-nav-actions {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 56px;               /* 与导航栏同高（8px padding + 40 内容） */
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  z-index: 60;                /* 与导航栏同层（导航栏 85% 毛玻璃在其下） */
+}
+/* v0.3.52 用户需求：布局/模式是同组视图按钮——navbar 全局 gap 10px 太大，
+   组内间距收紧为 4px（-6px 抵消）；v0.3.85 模式按钮同组；
+   v0.5.6 深浅色按钮已移除（设置面板「主题」项承担）→ 只剩 mode,layout */
+.vshell-nav-mode + .vshell-nav-layout {
+  margin-left: -6px;
+}
+.vshell-nav-btn:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+/* ---------- 视频卡片（vsc-video-card，照搬 skill 范例 video-card.html） ----------
+ * mimic: 以下 .vsc-video-* 规则逐字照搬 vscode-modern-ui
+ *   examples/video-card.html <style>（其样式本身即提取物仿照，
+ *   每条 mimic 注释见范例源文件；卡片几何 floating-panels.css:24） */
+
+/* mimic: 卡片容器——与 vsc-list/vsc-table 同款（floating-panels.css:24 卡片几何 +
+   sideBar.border 可见实线 + shadow-lg 浮层阴影 + cornerRadius-large 8px） */
+.vsc-video-card {
+  border: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border, transparent));
+  border-radius: var(--vscode-cornerRadius-large);
+  /* v0.3.7 用户需求：视频卡片背景统一 #181818
+     （原 v0.2.0 未看过 #1f1f1f / 看过 #181818 区分已废弃——用户指定全统一） */
+  background-color: #181818;
+  box-shadow: var(--vscode-shadow-lg);
+  color: var(--vscode-surface-foreground);
+  overflow: hidden;
+  /* vshell 适配：卡片纵向 flex —— body flex:1 撑满 → meta 贴卡片底部，
+     不随标题行数漂移（用户需求：UP名/日期相对卡片布局固定） */
+  display: flex;
+  flex-direction: column;
+  animation: vshell-rise 0.32s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+  animation-delay: calc(var(--i, 0) * 22ms);
+}
+.vsc-video-card.is-watched {
+  background-color: #181818;
+}
+/* v0.5.6 第七轮需求 3：角色主页重建网格时只有新增卡片播放入场动画——
+   旧卡片加 .no-anim 跳过动画（0,2,0 压过上面 .vsc-video-card 的 animation 0,1,0） */
+.vsc-video-card.no-anim {
+  animation: none;
+}
+/* v0.5.6 第十一轮（用户需求 5）：滚动恢复期间目标页先隐藏——防"先闪主页
+   顶端 + 播卡片入场动画再跳目标位置"。app.js 在 saved&&keep 恢复流程中给
+   .vshell-page 加 .is-restoring，恢复成功/超时后移除；隐藏期禁卡片动画
+   v0.5.6 第十五轮需求 5：恢复标记**提前到 mount 之前**加在 outlet 上
+   （mount 同步渲染卡片即播动画，之前加在 page 上等于先播一遍再隐藏），
+   两处选择器都保留（home.js 等子页按需检查） */
+.vshell-outlet.is-restoring {
+  opacity: 0;
+  pointer-events: none;
+}
+.vshell-outlet.is-restoring .vsc-video-card {
+  animation: none;
+}
+.vshell-page.is-restoring {
+  opacity: 0;
+  pointer-events: none;
+}
+.vshell-page.is-restoring .vsc-video-card {
+  animation: none;
+}
+
+/* ===== 媒体区（16:9 缩略图 = 视频首帧；悬停播放；整图 = 跳详情链接） ===== */
+.vsc-video-media {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--vscode-editor-background);
+  text-decoration: none;
+  color: inherit;
+  /* v0.5.6：媒体区下框线已去除（用户需求：卡片只有四周边框，无中间分隔线） */
+}
+/* video absolute 铺满（inset 0）：视频固有比例绝不撑高卡片；
+   封面态 object-fit cover（等比例缩放、裁切溢出，绝无黑边）；
+   播放态 contain + 黑底（等比例缩放、黑边 letterbox，内容不裁切） */
+.vsc-video-media video {
+  position: absolute; inset: 0;
+  display: block; width: 100%; height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+.vsc-video-card.is-previewing .vsc-video-media video {
+  object-fit: contain;
+}
+/* 底部压暗：常驻显示（衬托右下角时长纯文字可读），悬停播放时隐藏
+   （transparent → editor-background 渐变，颜色均出自 colors.css；
+     行为同列表组件：120ms ease 短过渡） */
+.vsc-video-shade {
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, transparent 55%, var(--vscode-editor-background));
+  opacity: 1;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+.vsc-video-media:hover .vsc-video-shade { opacity: 0; }
+
+/* v0.5.6 第二十三轮：本地视频无封面占位——截帧未完成/失败时不显示纯黑：
+   暗渐变 + 文件 icon（icon 优先，不用 emoji）；悬停淡出让位给视频预览 */
+.vsc-video-placeholder {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(160deg, #2a2d2e 0%, #181818 100%);
+  color: var(--vscode-descriptionForeground);
+  opacity: 1;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+  z-index: 1;
+}
+.vsc-video-placeholder .codicon { font-size: 34px; opacity: 0.55; }
+.vsc-video-card.is-local-nocover:hover .vsc-video-placeholder { opacity: 0; }
+/* 懒截帧成功热更新 poster 后移除占位（video-card.js 同源处理） */
+.vsc-video-card.is-local-nocover.has-cover .vsc-video-placeholder { display: none; }
+
+/* v0.5.7：源未启用（角色页全源快照可见但源未激活）——卡片置灰 + 角标
+   （icon 优先，不用 emoji）；点击仍可进详情（详情页有明确启用提示） */
+.vsc-video-card.src-disabled { opacity: 0.6; filter: saturate(0.55); }
+.vsc-video-card.src-disabled:hover { opacity: 0.85; filter: saturate(0.75); }
+.vsc-video-src-disabled {
+  position: absolute; top: 8px; left: 8px;
+  display: flex; align-items: center; gap: 4px;
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.62);
+  border-radius: 4px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  pointer-events: none;
+  z-index: 2;
+}
+.vsc-video-src-disabled .codicon { font-size: 12px; }
+
+/* ===== 时长徽章（常驻右下角，纯文字无底色；悬停隐藏让位给静音钮） ===== */
+/* mimic: 颜色——badge-foreground（dark_modern.json:14）；背景全透明、无图标 */
+.vsc-video-badge {
+  position: absolute; right: var(--vscode-spacing-size40); bottom: var(--vscode-spacing-size40);
+  color: var(--vscode-badge-foreground);
+  background: transparent;
+  font-size: var(--vscode-fontSize-label2);
+  line-height: 1.4;
+  opacity: 1;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+.vsc-video-media:hover .vsc-video-badge { opacity: 0; }
+
+/* ===== 播放/弹幕数（图片区左下，学 bilibili：icon + 纯数字；悬停隐藏） ===== */
+/* mimic: 颜色——badge-foreground（dark_modern.json:14）；icon 12px 与数字同行 */
+.vsc-video-stats {
+  position: absolute; left: var(--vscode-spacing-size40); bottom: var(--vscode-spacing-size40);
+  display: inline-flex; align-items: center; gap: 3px;
+  color: var(--vscode-badge-foreground);
+  background: transparent;
+  font-size: var(--vscode-fontSize-label2);
+  line-height: 1.4;
+  opacity: 1;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+.vsc-video-stats .codicon { font-size: 12px; }
+.vsc-video-stats-sep { opacity: 0.7; }
+.vsc-video-media:hover .vsc-video-stats { opacity: 0; }
+
+/* ===== 封面布局（v0.3.36 用户需求：图片占满卡片、标题浮封面顶部、
+   UP 不显示、日期放时长左侧）——.vshell-wall.is-cover 由布局切换按钮控制 ===== */
+.vshell-wall.is-cover .vsc-video-body,
+.vshell-role-marquee .vsc-video-body { display: none; }   /* 无文字区 */
+/* 标题浮层：封面顶部渐变底保证可读（v0.3.37 加深 0.8/0.4——用户需求
+   「标题下也添加渐变阴影，像播放量时间那行一样」）；pointer-events none
+   不挡图片点击跳转（media 是链接）；z-2 高于 shade、低于悬停浮层（actions z-3） */
+.vshell .vsc-video-title-cover {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  z-index: 2;
+  margin: 0;
+  padding: 10px 10px 20px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.4), transparent);
+  color: #fff;
+  font-size: var(--vscode-fontSize-body1);
+  font-weight: var(--vscode-fontWeight-semiBold);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+  /* v0.3.38 标题增亮：白字 + 深色投影增强对比（在封面画面上更醒目） */
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 10px rgba(0, 0, 0, 0.45);
+}
+/* 悬停隐藏标题（v0.3.37 用户需求：预览播放时画面干净） */
+.vshell-wall.is-cover .vsc-video-media:hover .vsc-video-title-cover,
+.vshell-role-marquee .vsc-video-media:hover .vsc-video-title-cover { opacity: 0; }
+/* 标题避让 tag 图（v0.3.37 用户需求：左上角 tag 图片不再挡标题开头；
+   只有实际存在可见角标（.has-char）时才让位——无角色角标 display:none
+   时元素仍在 DOM，兄弟选择器 `~` 只看元素存在，必须显式类过滤） */
+.vshell-wall.is-cover .vsc-video-tag-icons.has-char ~ .vsc-video-title-cover,
+.vshell-role-marquee .vsc-video-tag-icons.has-char ~ .vsc-video-title-cover { padding-left: 54px; }
+/* 封面布局下标题高亮关键词：去框框、改蓝色字（v0.3.37 用户需求——
+   与 standard 的框式高亮区分，封面浮层上用纯色蓝字更轻） */
+.vshell-wall.is-cover .vsc-video-title-tag,
+.vshell-role-marquee .vsc-video-title-tag {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+  color: var(--vscode-charts-blue, #59A4F9);
+}
+/* 底部渐变条（v0.3.37 用户需求：「像下面的播放量时间那行一样」——
+   底部播放量/时长/日期常驻文字加渐变衬底保证可读；悬停时 stats/badge
+   隐藏、渐变随之淡出） */
+.vshell-wall.is-cover .vsc-video-media::after,
+.vshell-role-marquee .vsc-video-media::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 44px;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.55), transparent);
+  pointer-events: none;
+  z-index: 1;
+  transition: opacity 120ms ease;
+}
+.vshell-wall.is-cover .vsc-video-media:hover .vsc-video-media::after,
+.vshell-role-marquee .vsc-video-media:hover .vsc-video-media::after { opacity: 0; }
+/* 播放进度条浮在底部渐变之上 */
+.vshell-wall.is-cover .vsc-video-progress,
+.vshell-role-marquee .vsc-video-progress { z-index: 2; }
+/* 右下角一排：[日期][时长]（日期在时长左侧——用户需求） */
+.vsc-video-cover-right {
+  position: absolute;
+  right: var(--vscode-spacing-size40);
+  bottom: var(--vscode-spacing-size40);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 1;
+}
+.vsc-video-cover-date {
+  color: var(--vscode-badge-foreground);
+  font-size: var(--vscode-fontSize-label2);
+  line-height: 1.4;
+  opacity: 1;
+  transition: opacity 120ms ease;
+}
+/* 封面布局下时长徽章回到正常流（rightBox 内）；悬停隐藏（让位静音钮浮现） */
+.vshell-wall.is-cover .vsc-video-badge,
+.vshell-role-marquee .vsc-video-badge { position: static; }
+.vshell-wall.is-cover .vsc-video-media:hover .vsc-video-badge,
+.vshell-wall.is-cover .vsc-video-media:hover .vsc-video-cover-date,
+.vshell-role-marquee .vsc-video-media:hover .vsc-video-badge,
+.vshell-role-marquee .vsc-video-media:hover .vsc-video-cover-date { opacity: 0; }
+/* 悬停浮层按钮（待看/收藏）与常驻标记浮在标题浮层之上 */
+.vshell-wall.is-cover .vsc-video-actions,
+.vshell-wall.is-cover .vsc-video-saved-marks,
+.vshell-wall.is-cover .vsc-video-tag-icons,
+.vshell-role-marquee .vsc-video-actions,
+.vshell-role-marquee .vsc-video-saved-marks,
+.vshell-role-marquee .vsc-video-tag-icons { z-index: 3; }
+
+/* ===== 卡片状态点（v0.3.0，用户需求改义） =====
+ * 右上角常驻：蓝点 = 已加入待看、红点 = 已收藏（红色与收藏按钮 active 一致
+ * errorForeground）；悬停时隐藏让位给 actions 操作按钮。
+ * 原分镜识别标记（.vsc-video-shots-mark）已删除——蓝点含义改义为待看 */
+.vsc-video-saved-marks {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  /* v0.5.6 第十二轮需求 9：3x3 网格布局（位置编号 5 2 1 / 6 4 3 / 9 8 7，
+     由 JS 按 MARK_POS 设置 gridRow/gridColumn；gap 3px） */
+  display: grid;
+  grid-template-columns: repeat(3, 6px);
+  grid-template-rows: repeat(3, 6px);
+  gap: 3px;
+  opacity: 1;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+  z-index: 2;
+}
+.vsc-video-saved-mark {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  /* v0.3.18 用户需求：圆点加阴影——近影 + 提取 token 柔和发散（同 tag 图） */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), var(--vscode-shadow-lg);
+}
+.vsc-video-saved-mark.is-watch { background: var(--vscode-charts-blue, #59A4F9); }
+.vsc-video-saved-mark.is-fav   { background: var(--vscode-errorForeground); }
+/* v0.5.6 第十二轮需求 2：本地视频圆点（绿）；需求 8：代表作圆点（金） */
+.vsc-video-saved-mark.is-local          { background: var(--vscode-terminal-ansiGreen, #89d185); }
+.vsc-video-saved-mark.is-featured-mark  { background: var(--vscode-editorLightBulb-foreground, #ffcc00); }
+.vsc-video-saved-mark.is-hidden { display: none; }
+.vsc-video-media:hover .vsc-video-saved-marks { opacity: 0; }
+
+/* ===== 卡片 tag 图片角标（v0.3.0 用户需求：tag 配图，左上角圆角方框） =====
+ * 匹配上的每个 tag 一张图（40x40 圆角方框，v0.3.1 用户要求大一倍）；
+ * 无图时 codicon-tag 占位；悬停时隐藏让位给 actions 收藏按钮（左上角） */
+.vsc-video-tag-icons {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 1;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+  z-index: 2;
+}
+/* v0.5.6 第七轮：tag 图/角色 icon 变为可点击 button（进入角色主页）——
+ * ①.vshell 前缀（0,2,0）压过 base.css:46 .vshell button 重置（0,1,1）的
+ *   background:none/border:none，否则 40x40 深底圆角方框样式会被清掉；
+ * ②容器 pointer-events:none（L767）→ 子 button 必须显式 pointer-events:auto
+ *   才能命中点击（父 none 会被子 auto 覆盖）；
+ * v0.5.6 第十二轮需求 10：已赋予角标（纯展示 span）**不可命中**——
+ *  pointer-events:auto 只保留给冲突 button（.is-conflict 可点击弹窗），
+ *  否则纯展示 span 会挡住下层收藏/代表作按钮（点击穿透跳详情页） */
+.vshell .vsc-video-tag-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  /* v0.3.16 用户需求：tag 图加阴影——近影保留 + 提取 token 柔和发散
+     mimic: shadow-lg = 0 0 12px rgba(0,0,0,0.14)（workbench-style.css:60） */
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4), var(--vscode-shadow-lg);
+  pointer-events: none;
+}
+.vshell .vsc-video-tag-icon.is-conflict {
+  pointer-events: auto;
+  cursor: pointer;
+}
+.vsc-video-tag-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* v0.3.3 用户需求：无图 tag → 白底圆角方框 + tag 首字（深色字） */
+.vshell .vsc-video-tag-icon.is-letter {
+  background: #fff;
+  border-color: rgba(255, 255, 255, 0.9);
+}
+.vsc-video-tag-letter {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  color: #181818;
+}
+.vsc-video-media:hover .vsc-video-tag-icons { opacity: 0; }
+/* v0.5.6 第十五轮需求 4：悬停淡出时冲突 icon（pointer-events:auto 的
+   button）**仍可命中**（opacity 不影响点击）——它叠在左上角收藏按钮
+   （.vsc-video-btn-star top/left 8px）正上方，点"收藏"实际点到冲突
+   icon → 弹出解决冲突界面。悬停态（actions 浮现、角标让位）必须同时
+   禁用冲突 icon 的命中（0,3,0 后置压过 .vshell .vsc-video-tag-icon.is-conflict） */
+.vsc-video-media:hover .vsc-video-tag-icon.is-conflict { pointer-events: none; }
+/* v0.5.6 第七轮曾加 .vsc-video-tag-icons:hover{opacity:1}（角标可点击时保持可见）；
+   第八轮用户反馈角标点击"不实用"回退为纯展示——悬停淡出让位恢复 */
+
+/* ===== 悬停操作层（收藏=左上 / 待看=右上，悬停浮现，自上滑入） ===== */
+.vsc-video-actions {
+  position: absolute; inset: 0;
+  opacity: 0;
+  transform: translateY(calc(-1 * var(--vscode-spacing-size40)));
+  transition: opacity 120ms ease, transform 120ms ease;
+  pointer-events: none;
+}
+.vsc-video-media:hover .vsc-video-actions {
+  opacity: 1; transform: none;
+}
+.vsc-video-media:hover .vsc-video-btn { pointer-events: auto; }
+.vsc-video-btn-watch { position: absolute; top: var(--vscode-spacing-size40); right: var(--vscode-spacing-size40); }
+.vsc-video-btn-star { position: absolute; top: var(--vscode-spacing-size40); left: var(--vscode-spacing-size40); }
+
+/* mimic: 纯图标按钮——28x28（PANE_HEADER_OVERRIDE_SIZE），圆角 cornerRadius-small，
+   图标 16px；语义走 aria-label/title（无文字）。
+   未激活=半透明深底（toolbar-hoverBackground rgba(90,93,94,0.31)，
+   _color_editorColors.ts:350，hover 用 toolbar-activeBackground _color_editorColors.ts:358）；
+   激活态：待看=蓝 button token（dark_modern.json:15-18），收藏=红 errorForeground
+   （dark_modern.json:46，hover 用 terminal-ansiRed _terminalColors.ts:112 加深） */
+/* vshell 适配：.vshell button 全局重置（base.css:39）特异性 0,1,1 会覆盖
+   单类规则 —— 按钮基础规则加 .vshell 前缀（与 .vshell-icon-btn 同法） */
+.vshell .vsc-video-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0;
+  border: none; border-radius: var(--vscode-cornerRadius-small);
+  cursor: pointer;
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-button-foreground);
+}
+.vsc-video-btn:hover { background: var(--vscode-toolbar-activeBackground); }
+.vsc-video-btn .codicon { font-size: 16px; }
+/* 激活态：已加入待看=蓝（hover 深蓝） */
+.vsc-video-btn-watch.is-active { background: var(--vscode-button-background); }
+.vsc-video-btn-watch.is-active:hover { background: var(--vscode-button-hoverBackground); }
+/* 激活态：已收藏=红（hover 深红） */
+.vsc-video-btn-star.is-active { background: var(--vscode-errorForeground); }
+.vsc-video-btn-star.is-active:hover { background: var(--vscode-terminal-ansiRed); }
+/* v0.5.6 第十轮需求 3：设为代表作按钮——与收藏/待看同款（secondary），
+   位置在收藏按钮（left:spacing40, 28px）右侧 8px 处 */
+.vsc-video-btn-feature { position: absolute; top: var(--vscode-spacing-size40); left: calc(var(--vscode-spacing-size40) + 36px); }
+.vsc-video-btn-feature.is-active { background: var(--vscode-button-background); }
+.vsc-video-btn-feature.is-active:hover { background: var(--vscode-button-hoverBackground); }
+.vsc-video-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+
+/* ===== 静音指示钮（悬停浮现，点击切换声音；动画与操作层一致） ===== */
+/* 同上：.vshell button 覆盖规避 */
+/* 底部偏移 = spacing-size40；预览播放（进度条显示）时上移进度条高度 2px，
+   播完/离开（进度条消失）后下移回原位（用户需求 4/8） */
+.vshell .vsc-video-mute {
+  position: absolute; right: var(--vscode-spacing-size40);
+  bottom: var(--vscode-spacing-size40);
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: var(--vscode-cornerRadius-small);
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  opacity: 0;
+  /* vshell 适配：与待看/收藏同款 120ms 滑入动画（自下而上，与操作层对称） */
+  transform: translateY(var(--vscode-spacing-size40));
+  transition: opacity 120ms ease, transform 120ms ease, bottom 120ms ease;
+  pointer-events: none;
+  /* 用户反馈：点取消静音会进视频页——悬停浮层（actions z-3）曾盖住按钮截走
+     点击（冒泡到 media 触发 a 导航）；按钮必须始终在浮层之上 */
+  z-index: 3;
+}
+.vsc-video-media:hover .vsc-video-mute { opacity: 1; transform: none; pointer-events: auto; }
+.vsc-video-card.is-previewing .vsc-video-mute { bottom: calc(var(--vscode-spacing-size40) + 2px); }
+.vsc-video-mute .codicon { font-size: 16px; }
+.vsc-video-mute:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+
+/* ===== 黑名单按钮（v0.3.2 用户需求：左下角，悬停浮现） =====
+ * 与静音钮同款（28x28、toolbar-hoverBackground、120ms 滑入）；
+ * 位置对称在左下角——常态隐藏，悬停时显示（stats 播放量悬停隐藏不冲突）；
+ * 点击屏蔽单个视频：加入黑名单 + 卡片局部移除 */
+.vshell .vsc-video-blacklist {
+  position: absolute; left: var(--vscode-spacing-size40);
+  bottom: var(--vscode-spacing-size40);
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: var(--vscode-cornerRadius-small);
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(var(--vscode-spacing-size40));
+  transition: opacity 120ms ease, transform 120ms ease, bottom 120ms ease;
+  pointer-events: none;
+  z-index: 3;   /* 同静音钮：始终在悬停浮层之上（防误点导航） */
+}
+.vsc-video-media:hover .vsc-video-blacklist { opacity: 1; transform: none; pointer-events: auto; }
+.vsc-video-card.is-previewing .vsc-video-blacklist { bottom: calc(var(--vscode-spacing-size40) + 2px); }
+.vsc-video-blacklist .codicon { font-size: 16px; }
+.vsc-video-blacklist:hover { color: var(--vscode-errorForeground); }
+.vsc-video-blacklist:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+
+/* ===== 播放进度条（预览播放时图片内底部；仅播放中可见；细窄 2px） ===== */
+.vsc-video-progress {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.28);
+  opacity: 0;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+.vsc-video-card.is-previewing .vsc-video-progress { opacity: 1; }
+.vsc-video-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--kk-progress-color, #0078D4);
+  transition: width 120ms linear;
+}
+
+/* 禁用浏览器视频浮层（Edge「视频快速操作」/ Chromium PiP 按钮）：
+   隐藏 WebKit 原生控件伪元素 + 属性级禁用在 video-card/player 已加 */
+.vshell video::-webkit-media-controls,
+.vshell video::-webkit-media-controls-enclosure,
+.vshell video::-webkit-media-controls-panel {
+  display: none !important;
+  -webkit-appearance: none;
+}
+
+/* ===== 文字区（标题两行截断 + meta 两端：UP名(icon+名字)左/日期右） ===== */
+.vsc-video-body {
+  padding: var(--vscode-spacing-size60) var(--vscode-spacing-size80) var(--vscode-spacing-size80);
+  /* vshell 适配：纵向 flex + flex:1 → meta 恒定贴卡片底部（不随标题行数漂移） */
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+/* vshell 适配：标题为链接（跳详情），取卡片文字色（非链接蓝）——
+   .vshell a（base.css）特异性 0,1,1 会覆盖单类规则，必须 .vshell 前缀 */
+.vshell .vsc-video-title {
+  margin: 0;
+  flex: 1;
+  /* 两行占位：标题 1 行时下方留白，meta 仍贴底
+     v0.3.14：min-height/max-height = 3.6em = 2 × line-height 1.8 */
+  min-height: 3.6em;
+  color: var(--vscode-surface-foreground);
+  font-size: var(--vscode-fontSize-body1);
+  font-weight: var(--vscode-fontWeight-semiBold);
+  /* v0.3.14 关键修复（CDP 实测定位）：高亮块 rect 高 23px（字体字形盒 14.2 +
+     padding 4 + border 2 + 字形盒余量），行框 21.45px（1.65）容不下，
+     baseline 对齐下块向上溢出：块 top=420.75 < 标题盒 top=421.75 → 1px
+     顶部边框被 overflow:hidden 裁掉（用户"最上面会被裁切"）。
+     行框提至 1.8（23.4px）≥ 块 23px，块完整落入行框不再溢出 */
+  line-height: 1.8;
+  display: block;
+  max-height: 3.6em;
+  overflow: hidden;
+}
+.vsc-video-meta {
+  margin-top: var(--vscode-spacing-size40);
+  display: flex; align-items: center; justify-content: space-between; gap: var(--vscode-spacing-size20);
+  font-size: var(--vscode-fontSize-label2);
+  color: var(--vscode-descriptionForeground);
+  /* v0.5.6 第十轮需求 6b：即使无角色也无日期，meta 也保持有内容的高度
+     （日期行 16px ≈ 12px 字号行高——空 meta 不塌陷） */
+  min-height: 16px;
+}
+/* v0.5.6 第八轮：meta 行只有日期时（角色主页 noRoleMeta 卡）靠右显示，
+   保持右下角位置（space-between 单元素会漂到左侧） */
+.vsc-video-meta.no-owner {
+  justify-content: flex-end;
+}
+/* v0.5.6 第七轮：meta 角色名改为可点击 button（进入角色主页）——
+ * .vshell 前缀（0,2,0）压过 base.css:46 .vshell button 重置（0,1,1）；
+ * 第八轮用户反馈"不要下划线"——hover 只做颜色提亮（链接语义弱化） */
+.vshell .vsc-video-meta-owner {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0;
+}
+/* 悬停反馈：颜色提亮（无下划线——用户需求） */
+.vshell .vsc-video-meta-owner:hover {
+  color: var(--vscode-foreground);
+}
+.vsc-video-meta-owner .codicon { font-size: 12px; flex: none; }
+/* v0.5.4 用户需求：冲突视频卡片原 UP 位置显示红字「冲突」 */
+.vsc-video-meta-owner.is-conflict {
+  color: var(--vscode-errorForeground);
+  font-weight: 600;
+}
+.vsc-video-meta-owner-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* v0.3.7 tag 高亮（用户指定值，写死不走 token）：
+ * 背景 #1c1c1c + border 1px solid #484848 + box-shadow 0 0 4px 0 #272727；
+ * 字色 inherit 不动；几何保留卡片一致圆角 cornerRadius-large 8px */
+.vshell .vsc-video-title-tag {
+  color: inherit;                            /* 字颜色不动（随标题文字色） */
+  border: 1px solid #484848;
+  border-radius: var(--vscode-cornerRadius-large);
+  background: #1c1c1c;
+  box-shadow: 0 0 4px 0 #272727;
+  padding: 2px 6px;                          /* 边框不贴字（v0.3.9 用户需求：上下 2px 左右 6px） */
+  /* v0.3.12 关键：inline 盒高 = line-height + padding + border——必须自设
+     line-height: 1（盒高 19px）否则继承标题 1.65 → 26.5px 超行框被 line-clamp 裁切 */
+  line-height: 1;
+  /* v0.3.10 曾加 top:3px 下移——line-clamp 固定行高裁剪导致裁切，已回退 */
+  margin: 0 3px;                             /* 相邻高亮段留缝（v0.3.15：1px → 3px 用户需求） */
+}
+.vsc-video-meta-date {
+  flex: none;
+  margin-left: auto;
+}
+
+/* 尊重系统减弱动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .vsc-video-shade, .vsc-video-actions, .vsc-video-mute, .vsc-video-blacklist, .vsc-video-badge, .vsc-video-stats,
+  .vsc-video-progress { transition: none; }
+}
+
+/* 触屏（无 hover）：操作层常显（移动端适配，桌面行为照搬 demo） */
+@media (hover: none) {
+  .vsc-video-actions { opacity: 1; transform: none; }
+  .vsc-video-actions .vsc-video-btn { pointer-events: auto; }
+  /* 静音钮与时长徽章同位置（右下），触屏隐藏静音钮让位徽章；
+     黑名单按钮同策略隐藏（触屏无悬停，屏蔽操作走导航栏面板） */
+  .vsc-video-mute { display: none; }
+  .vsc-video-blacklist { display: none; }
+}
+
+/* ---------- 视频墙 ---------- */
+.vshell-wall {
+  display: grid;
+  /* 卡片加大（用户需求）：墙容器宽度不变，只把卡片下限提高 → 更少列、每张更宽
+     400px 下限：1440 屏 3 列 ~466px、1920 屏 4 列 ~468px、1280 屏 3 列 ~413px */
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  gap: var(--vshell-card-gap, 6px);   /* v0.5.6 用户需求：卡片间距拖动条（cardgap.js 设置变量） */
+  padding: 0 0 8px;      /* 上下左右 padding 取消（用户需求），仅留底部呼吸 */
+}
+.vshell-wall-sentinel {
+  height: 2px;
+}
+.vshell-wall-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 20px 0;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* ---------- 播放器（自研控制，无原生 UI） ---------- */
+.vshell-player {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  overflow: hidden;
+  border-radius: 10px;
+  isolation: isolate;   /* 快扫窗口 z-index:-1 锚定在本容器层叠上下文内 */
+}
+.vshell-player-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+.vshell .vshell-player-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(0.92);
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;                     /* .vshell 前缀：base .vshell button color:inherit 会覆盖 */
+  font-size: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms ease, background 120ms ease;
+}
+.vshell-player-center-show {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) scale(1);
+}
+.vshell-player-center:hover {
+  background: rgba(0, 0, 0, 0.75);
+}
+.vshell-player-controls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 12px;   /* 底部留白：12px = 22px - 10px（用户需求：控件继续下移，共下移 10px） */
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.72));
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+.vshell-player-controls-visible .vshell-player-controls {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+/* v0.5.4 用户需求：自动隐藏时悬停在任意控件上 → 只显示该控件（其余仍隐藏）。
+   隐藏态：容器保留摆放（opacity 1 才能让 peek 子项可见）+ 去掉渐变衬底，
+   子控件各自 opacity 0 + pointer-events none；JS mousemove 坐标命中
+   直接子控件 → 加 .is-peeked（唯一显示，可交互） */
+.vshell-player:not(.vshell-player-controls-visible) .vshell-player-controls {
+  opacity: 1;
+  transform: translateY(8px);
+  background: transparent;
+}
+.vshell-player:not(.vshell-player-controls-visible) .vshell-player-controls > * {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.vshell-player:not(.vshell-player-controls-visible) .vshell-player-controls > .is-peeked {
+  opacity: 1;
+  pointer-events: auto;
+}
+.vshell .vshell-player-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;                     /* .vshell 前缀：base .vshell button color:inherit 会覆盖，
+                                      导致播放/暂停图标变主题色在暗渐变上看不清 */
+  font-size: 15px;
+  border-radius: 6px;
+  transition: background 120ms ease, transform 120ms ease;
+}
+.vshell-player-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  transform: scale(1.08);
+}
+/* 倍速：字号压过 .vshell .vshell-player-btn(15px) 需同特异性前缀 */
+.vshell .vshell-player-rate {
+  font-size: 10px;       /* 用户需求：倍速文字调小（详情页+刷页共用） */
+  width: auto;
+  padding: 0 6px;
+}
+/* ===== 分镜节点最小间隔滑块（v0.1.6，用户需求：控制栏滑块调 t） =====
+   按钮显示当前值（点击恢复默认 1.2s）+ 窄条拖动（0-5s，0=关闭约束）；
+   调 setMinGap → gapChange → 各页重新约束渲染节点（含回溯复活） */
+.vshell-player-gap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vshell .vshell-player-gap-btn {
+  font-size: 11px;
+  width: auto;
+  min-width: 34px;
+  padding: 0 5px;
+}
+.vshell-player-gap-bar {
+  position: relative;
+  width: 96px;                 /* 指数档位 13 档（0.1s~10min），加宽保证档位可拖准 */
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  touch-action: none;
+}
+.vshell-player-gap-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 24%;
+  border-radius: 2px;
+  background: var(--kk-progress-color, #0078D4);
+}
+/* 移动端控制栏空间有限：隐藏间隔滑块（节点仍显示） */
+@media (max-width: 768px) {
+  .vshell-player-gap { display: none; }
+}
+/* ===== 播放器进度条（KKAV 风格，video-progress-bar-usage.md） =====
+   播放器根级底部覆盖条（学 bilibili：进度条独立于控制栏、贴最底部），
+   4px 细条、hover 变高 8px 便于抓取；点击/拖动 seek（拖动期 transition none
+   即时跟手，松手恢复 0.45s 平滑）；fill 色 --kk-progress-color。
+   命中区 = 视觉轨道上方额外 5px（用户需求：竖向增大点击/悬停范围，
+   视觉不变——轨道 ::before bottom:0 贴底，height 扩展只扩大命中区）。
+   v0.3.95 用户需求「进度条不要隐藏」：bar 是播放器根级独立元素（非 controls
+   子元素），controls 自动隐藏（刷页/全屏 0.7s）不影响它；opacity 显式 1
+   声明为永不变更的契约。轨道提亮 + 深色光晕：controls 隐藏后失去底部渐变
+   衬底，亮画面上半透明白轨道仍清晰可见（不引入黑条/背景） */
+.vshell-player-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 19px;               /* 命中区：14px 视觉 + 上方 5px 扩展 */
+  cursor: pointer;
+  touch-action: none;
+  opacity: 1;                 /* 进度条永不隐藏（独立于 controls 显隐） */
+}
+/* ===== 进度条轨道（底部覆盖条；v0.4.5 回退：取消已识别层显示，
+   轨道颜色恢复 v0.3.95 的 0.38 提亮——亮画面上可见，不引入黑条） ===== */
+.vshell-player-bar::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;         /* 贴播放器底部（用户需求：紧贴底部） */
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.38);
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.6);
+  transition: height 120ms ease;
+}
+.vshell-player-bar:hover::before { height: 8px; }
+.vshell-player-bar-buffer {
+  position: absolute;
+  left: 0; bottom: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.35);
+  width: 0;
+  transition: height 120ms ease;
+}
+.vshell-player-bar:hover .vshell-player-bar-buffer { height: 8px; }
+.vshell-player-bar-fill {
+  position: absolute;
+  left: 0; bottom: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--kk-progress-color, #0078D4);
+  box-shadow: 0 0 6px var(--kk-progress-color, #0078D4);
+  width: 0;
+  transition: height 120ms ease, width 450ms linear;   /* KKAV：松手 0.45s 平滑 */
+}
+.vshell-player-bar:hover .vshell-player-bar-fill { height: 8px; }
+/* KKAV：拖动期即时反馈——fill 不插值、不与手指抢位置；
+   seek 期间（v0.1.8）同样禁止宽度过渡（点击后立即到位，无「从 0 动画」） */
+.vshell-player-bar-dragging .vshell-player-bar-fill,
+.vshell-player-bar-seeking .vshell-player-bar-fill,
+.vshell-player-bar-dragging::before { transition: none; }
+
+/* ===== 进度条悬停预览（v0.5.6 第十二轮需求 1） =====
+   鼠标悬停进度条 → 播放器内进度条上方浮层：canvas 截帧（160x90，
+   深底圆角 + 边框）+ 时间戳；水平跟随指针（JS 设 left） */
+.vshell-player-seekprev {
+  position: absolute;
+  bottom: 22px;               /* 进度条命中区上方 */
+  width: 160px;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.82);
+  border: 1px solid var(--vscode-panel-border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  display: none;
+  pointer-events: none;
+  z-index: 8;
+}
+.vshell-player-seekprev.is-on { display: block; }
+.vshell-player-seekprev-canvas {
+  display: block;
+  width: 152px;
+  height: 86px;
+  border-radius: 4px;
+  background: #000;
+}
+.vshell-player-seekprev-time {
+  display: block;
+  text-align: center;
+  margin-top: 3px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+
+/* ===== 分段进度条（v0.1.7，用户需求：进度条直接渲染成一段一段的） =====
+   有分镜节点时 bar 加 class vshell-bar-segmented：
+   - 整条轨道（::before）/buffer/fill 隐藏；
+   - .vshell-player-bar-segs 内按「节点间区间」生成独立段，
+     段内 track/buffer/fill 三层；段间 2px 空隙 = 节点处完全断开；
+   - 播放进度由 shots.updateProgress 驱动（段内比例，跨节点自动断） */
+.vshell-bar-segmented::before,
+.vshell-bar-segmented .vshell-player-bar-buffer,
+.vshell-bar-segmented .vshell-player-bar-fill { display: none; }
+.vshell-player-bar-segs {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 4px;
+  pointer-events: none;
+}
+/* 段：19px 全高命中区（与 bar 一致），视觉条在底部 4px——
+   悬停时**只有当前悬停的段**变 8px（用户需求，不再是整条变宽）；
+   pointer-events:auto 显式——父级 segs 容器 pointer-events:none，
+   子元素需显式重启用才能参与命中（CSS hit-testing 语义） */
+.vshell-player-bar-seg {
+  position: absolute;
+  bottom: 0;
+  height: 19px;
+  pointer-events: auto;
+}
+.vshell-player-bar-seg-track,
+.vshell-player-bar-seg-buffer,
+.vshell-player-bar-seg-fill {
+  position: absolute;
+  left: 0; bottom: 0;
+  height: 4px;
+  border-radius: 2px;
+  transition: height 120ms ease;
+}
+.vshell-player-bar-seg:hover .vshell-player-bar-seg-track,
+.vshell-player-bar-seg:hover .vshell-player-bar-seg-buffer,
+.vshell-player-bar-seg:hover .vshell-player-bar-seg-fill,
+/* v0.5.6 第二十六轮需求 2：is-hovered（shots.js renderNodes 重建瞬间恢复
+   悬停段展开态——首帧即 8px，不重播 4→8 展开动画）与 :hover 同权 */
+.vshell-player-bar-seg.is-hovered .vshell-player-bar-seg-track,
+.vshell-player-bar-seg.is-hovered .vshell-player-bar-seg-buffer,
+.vshell-player-bar-seg.is-hovered .vshell-player-bar-seg-fill { height: 8px; }
+.vshell-player-bar-seg-track {
+  right: 0;
+  background: rgba(255, 255, 255, 0.2);
+}
+.vshell-player-bar-seg-buffer {
+  width: 0;
+  background: rgba(255, 255, 255, 0.35);
+}
+.vshell-player-bar-seg-fill {
+  width: 0;
+  background: var(--kk-progress-color, #0078D4);
+  box-shadow: 0 0 6px var(--kk-progress-color, #0078D4);
+  transition: height 120ms ease, width 450ms linear;   /* hover 高度 + KKAV 宽度平滑 */
+}
+/* 拖动期即时跟手 + seek 期间（点击/拖动后、seeked 前）禁止宽度过渡：
+   避免「从 0 动画到目标」（用户需求 v0.1.8） */
+.vshell-player-bar-dragging .vshell-player-bar-seg-fill,
+.vshell-player-bar-seeking .vshell-player-bar-seg-fill { transition: none; }
+
+/* ---------- 分镜节点（进度条分段，shots.js 渲染） ----------
+ * **v0.1.7 用户需求：节点处进度条真正透明（透过看到视频内容）——
+ * 视觉由 bar 的 SVG mask 完成（节点处挖空轨道/fill），span 仅作
+ * hover title 命中区（透明不可见，不挡进度条拖动） */
+.vshell-player-bar-nodes {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+.vshell-player-bar-node {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;                    /* hover title 命中区（透明） */
+  transform: translateX(-50%);   /* 居中于节点时间位置 */
+  pointer-events: auto;
+  background: transparent;
+}
+
+/* ---------- 快扫渲染容器（不可见，仅保证 video 渲染） ----------
+ * ⚠️ 关键：快扫 video 必须「可见渲染」——Chromium 对完全不可见
+ * （opacity:0 / display:none / visibility:hidden）的 video 跳过帧缓冲
+ * 更新，canvas drawImage 恒黑帧 → 快扫检不出节点。
+ * v0.3.99（用户需求：识别时不要显示右下角缩小播放窗）：
+ *   opacity 0.02（alpha≠0 保留合成渲染）+ 尺寸缩到 32x18（1/9）+
+ *   去阴影圆角——深色播放器画面上肉眼几乎不可见，但 Chromium 判定
+ *   可见仍走渲染管线（历史教训：完全隐藏/被遮挡会 0 节点）；
+ * v0.4.3：opacity 0.02→0.1、32x18→48x27——极小+极透明元素在真实
+ *   GPU 合成下被 Chromium 判低媒体优先级（下载/解码节流），自适应
+ *   倍速被压到 ~1x（用户反馈"识别与播放同速"）；提高可见性余量 */
+.vshell-scan-window {
+  position: absolute;
+  right: 12px;
+  bottom: 64px;
+  width: 48px;
+  height: 27px;
+  opacity: 0.1;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 6;
+  border-radius: 0;
+  background: #000;
+  box-shadow: none;
+}
+.vshell-scan-window video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  display: block;
+}
+.vshell-scan-window-bar,
+.vshell-scan-window-pct {
+  display: none;   /* 进度显示移到胶囊；容器内元素不参与视觉 */
+}
+
+.vshell-player-time {
+  color: #fff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 96px;
+  text-align: center;
+  margin-right: auto;              /* 用户需求：播放钮+时间靠左，其余（音量/倍速/全屏）靠右 */
+}
+.vshell-player-vol {
+  width: 64px;
+  height: 14px;
+  position: relative;
+  cursor: pointer;
+}
+.vshell-player-vol::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.25);
+}
+.vshell-player-vol-fill {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 4px;
+  border-radius: 2px;
+  background: #fff;
+  width: 80%;
+}
+.vshell-player-loading {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  /* 关键：loading 层覆盖全播放器（DOM 在 controls 之后、绘制在上），
+     buffering 期间必须穿透点击，否则控制栏按钮/进度条全部无响应（用户反馈） */
+  pointer-events: none;
+}
+.vshell-player-buffering .vshell-player-loading {
+  display: flex;
+}
+/* 全屏：直接切换无动画（v0.2.5 回退——用户要求去除所有全屏动画效果） */
+.vshell-player-fullscreen {
+  border-radius: 0;
+}
+.vshell-player-muted .vshell-player-center {
+  display: none;
+}
+
+/* ---------- 抖音刷视图 ---------- */
+/* v0.5.6 第十轮（用户需求 7）：全屏改为 **feed 容器**全屏（不再是 slide）——
+   需求 7b：全屏后仍可上下滚动（feed 自身是滚动容器，scroll-snap 继续）；
+   is-feed-fullscreen-sim = 原生 API 不可用时的模拟全屏（fixed 铺满） */
+.vshell-feed:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+}
+.vshell-feed.is-feed-fullscreen-sim {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9999;
+  background: #000;
+}
+.vshell-feed:fullscreen .vshell-feed-info,
+.vshell-feed.is-feed-fullscreen-sim .vshell-feed-info {
+  pointer-events: auto;   /* 全屏时信息区可交互（悬停恢复控件） */
+  /* v0.5.6 第十一轮（用户需求 8）：抖音页全屏后左上角内容放大 1.5x——
+     以左上角为缩放原点（transform 不改变布局，溢出被 slide overflow
+     hidden 裁掉；内容本身在左缘，视觉即"左上角放大"） */
+  transform: scale(1.5);
+  transform-origin: top left;
+}
+.vshell-feed {
+  height: calc(100vh - 53px);
+  height: calc(100dvh - 53px);
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
+  background: #000;
+  overscroll-behavior: contain;
+  /* 刷页不显示滚动条（保留滚动能力） */
+  scrollbar-width: none;
+}
+.vshell-feed::-webkit-scrollbar {
+  display: none;
+}
+.vshell-feed-slide {
+  position: relative;
+  height: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.vshell-feed-media {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.vshell-feed-poster {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.55;
+  transition: opacity 200ms ease;
+}
+.vshell-feed .vshell-player {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+.vshell-feed-info {
+  position: absolute;
+  left: 0;
+  right: 0;                            /* v0.3.92：阴影全宽（原 right:96px 让位
+                                          动作列 → 顶部阴影右侧缺一块，用户反馈） */
+  top: 0;                              /* 标题放视频上方部分（用户需求） */
+  padding: 14px 16px 44px;
+  background: linear-gradient(0deg, transparent, rgba(0, 0, 0, 0.78));
+  color: #fff;
+  pointer-events: none;
+  transition: opacity 200ms ease;      /* v0.3.92：鼠标静止自动隐藏 */
+}
+/* v0.3.92：标题/头像内容仍让位右侧动作列（阴影全宽但内容不穿过去） */
+.vshell-feed-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 110px);
+}
+.vshell .vshell-feed-avatar {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  /* v0.5.3：角色圆形头像边框——用户定稿：1px 不透明 + 阴影。
+     v0.5.3b：深色模式原纯白 #fff——白底首字头像与白边同色、边框不可辨
+     （用户反馈不明显）→ 改主题中灰 dropdown-border #3C3C3C：
+     白底头像上可见、深色背景上也可见（mimic: dropdown-border 提取 token）。
+     .vshell 前缀：char 分支为 button，base .vshell button{border:none}
+     （0,1,1）会覆盖单类规则——必须 0,2,0 前缀 */
+  border: 1px solid var(--vscode-dropdown-border, #3C3C3C);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  background: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.vshell-theme-light .vshell-feed-avatar {
+  border-color: rgba(0, 0, 0, 0.35);
+}
+/* v0.5.3b：头像可点击（添加/冲突/角色图）——info 渐变层 pointer-events:none
+   会穿透所有子元素，复制按钮曾显式 auto；头像按钮必须同样显式 */
+.vshell .vshell-feed-avatar {
+  pointer-events: auto;
+}
+.vshell-feed-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.vshell-feed-head-text {
+  min-width: 0;
+  flex: 1;
+}
+.vshell-feed-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vshell-feed-title {
+  /* 不撑满行（按钮会贴右缘）——按钮紧跟标题文字（用户需求），
+     超长标题才截断：max-width 留出按钮 + 间距 */
+  flex: none;
+  max-width: calc(100% - 28px);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 标题右侧复制按钮（用户需求）：info 是 pointer-events:none 渐变层
+   （hover 永不触发）→ 按钮常驻可见；hover 加强背景；复制成功打勾 + 脉冲 */
+.vshell-feed-copy {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  opacity: 1;
+  transition: background 120ms ease;
+  pointer-events: auto;
+}
+.vshell-feed-copy:hover { background: rgba(255, 255, 255, 0.16); }
+.vshell-feed-copy .codicon { font-size: 13px; }
+.vshell-feed-copy.is-copied {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #4ec9b0);
+  animation: vshell-pop 300ms ease;
+}
+.vshell-feed-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.8);
+  margin-top: 2px;
+}
+/* v0.5.6 第十一轮：角色名改**按钮**（点击 = 更改角色）——继承 meta 行
+   字号/省略；.vshell 前缀压过 base .vshell button 重置（0,1,1）；
+   pointer-events:auto 常驻：隐藏态（is-ui-hidden）也直接可点（同
+   .vshell-feed-edit 方案——用户需求 3"像复制标题按钮一样"） */
+.vshell .vshell-feed-meta-name {
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: color 120ms ease;
+}
+/* v0.5.6 第十二轮需求 8：hover 去下划线 + 统一悬停色（textLink，
+   与墙卡 meta-owner / 详情页 up-name 一致——三处统一） */
+.vshell .vshell-feed-meta-name:hover {
+  color: var(--vscode-textLink-foreground, #4daafc);
+}
+/* v0.5.6 第十一轮：关注按钮（角色名右侧 + / ✓）——小圆钮半透明底，
+   常驻可点（隐藏态同 name 可点）
+   v0.5.6 第十二轮需求 3：点击后 pop 动画 + 图标变对勾，**背景色不变**
+   （不加蓝底——保持原半透明底，只图标切换） */
+/* v0.5.6 第十三轮需求 3：动画**不能是放大**——改为优雅的 icon 淡入
+   （fade + 2px 上浮，180ms），三处关注按钮（feed/detail/picker）统一 */
+@keyframes vshell-follow-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+.vshell .vshell-feed-follow {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: rgba(255, 255, 255, 0.85);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background 120ms ease, color 120ms ease;
+}
+.vshell .vshell-feed-follow .codicon {
+  font-size: 11px;
+}
+.vshell .vshell-feed-follow:hover {
+  background: rgba(0, 0, 0, 0.72);
+}
+.vshell .vshell-feed-follow.is-popping .codicon {
+  animation: vshell-follow-in 180ms ease;
+}
+.vshell .vshell-feed-follow.is-followed {
+  /* 背景色不变（用户需求 3）；对勾白字即可辨识 */
+  color: #fff;
+}
+/* v0.5.3：冲突时 meta 文本「角色冲突」用冲突色 */
+.vshell-feed-meta.is-conflict {
+  color: var(--vscode-errorForeground);
+}
+.vshell-feed-actions {
+  position: absolute;
+  right: 10px;
+  bottom: 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  z-index: 3;
+  transition: opacity 200ms ease;      /* v0.3.92：鼠标静止自动隐藏 */
+}
+/* v0.3.92 用户需求：抖音刷页鼠标静止一段时间 → 隐藏顶部标题/阴影与右侧动作列
+   （播放器控件在 mutedAutoplay 下由播放器自身逻辑自动隐藏，三者节奏一致）
+   v0.5.4：隐藏前检查——悬停中的 info/actions 加 .is-peeked 保留显示 */
+.vshell-feed.is-ui-hidden .vshell-feed-info,
+.vshell-feed.is-ui-hidden .vshell-feed-actions {
+  opacity: 0;
+  pointer-events: none;
+}
+.vshell-feed.is-ui-hidden .vshell-feed-info.is-peeked,
+.vshell-feed.is-ui-hidden .vshell-feed-actions.is-peeked {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* v0.5.6 第四轮：移除隐藏态 meta 行拦截层（v0.5.6 加的 ::after 方案——
+   用户反馈"问题还是没有解决，我希望可以直接点击，就像那个复制标题按钮
+   一样"）→ 改用复制按钮同款方案：.vshell-feed-edit 自身常驻
+   pointer-events:auto（见 pages.css），隐藏态也直接可点 */
+.vshell-feed-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 52px;
+  color: #fff;
+}
+.vshell-feed-action .codicon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  backdrop-filter: blur(4px);
+  transition: transform 140ms ease, background 140ms ease;
+}
+.vshell-feed-action:hover .codicon {
+  transform: scale(1.1);
+  background: rgba(0, 0, 0, 0.65);
+}
+.vshell-feed-action-label {
+  font-size: 11px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+/* v0.3.96 用户需求：右侧四按钮标准化——详情/待看/收藏/黑名单；
+   已在对应列表中的按钮用对应色高亮（与卡片右上角圆点同语义）：
+   待看=charts-blue、收藏=errorForeground、黑名单=charts-orange
+   mimic: _color_chartsColors.ts:26/34（dark_modern.json charts.blue #59A4F9 / charts.orange #EA5C00） */
+.vshell-feed-action.is-active-watch .codicon,
+.vshell-feed-action.is-active-watch .vshell-feed-action-label { color: var(--vscode-charts-blue); }
+.vshell-feed-action.is-active-fav .codicon,
+.vshell-feed-action.is-active-fav .vshell-feed-action-label { color: var(--vscode-errorForeground); }
+.vshell-feed-action.is-active-black .codicon,
+.vshell-feed-action.is-active-black .vshell-feed-action-label { color: var(--vscode-charts-orange); }
+
+/* ---------- 下载悬浮胶囊 ---------- */
+.vshell-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  animation: vshell-fab-in 0.28s cubic-bezier(0.2, 0.8, 0.3, 1.1);
+}
+.vshell-fab-capsule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 14px;
+  border-radius: 22px;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-widget-border);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  color: var(--vscode-foreground);
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+.vshell-fab-capsule:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.vshell-fab-icon {
+  font-size: 17px;
+  color: var(--vscode-charts-blue);
+}
+.vshell-fab-count {
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 18px;
+  text-align: center;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  border-radius: 9px;
+  padding: 1px 6px;
+}
+.vshell-fab-bar {
+  width: 60px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--vscode-list-hoverBackground);
+  overflow: hidden;
+}
+.vshell-fab-bar-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--vscode-progressBar-background);
+  border-radius: 2px;
+  transition: width 300ms ease;
+}
+.vshell-fab-drawer {
+  width: 320px;
+  max-height: 62vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  animation: vshell-pop 0.18s ease;
+}
+.vshell-fab-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+.vshell-fab-drawer-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+.vshell-fab-drawer-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vscode-descriptionForeground);
+  font-size: 14px;
+}
+.vshell-fab-drawer-close:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-foreground);
+}
+.vshell-fab-drawer-list {
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vshell-fab-row {
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.vshell-fab-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.vshell-fab-row-thumb {
+  width: 56px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--vscode-list-hoverBackground);
+  flex: none;
+}
+.vshell-fab-row-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vshell-fab-row-title {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vshell-fab-row-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--vscode-list-hoverBackground);
+  overflow: hidden;
+}
+.vshell-fab-row-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--vscode-progressBar-background);
+  border-radius: 2px;
+  width: 0;
+  transition: width 300ms ease;
+}
+.vshell-fab-row-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.vshell-fab-drawer-foot {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+.vshell-fab-drawer-btn {
+  flex: 1;
+  height: 30px;
+  border-radius: 6px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-foreground);
+  transition: background 120ms ease, color 120ms ease;
+}
+.vshell-fab-drawer-btn:hover {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+.vshell-fab-drawer-link {
+  text-decoration: none;
+}
+
+/* 任务状态色 */
+.vshell-status-downloading {
+  color: var(--vscode-charts-blue);
+}
+.vshell-status-merging {
+  color: var(--vscode-progressBar-background);
+}
+.vshell-status-paused {
+  color: var(--vscode-descriptionForeground);
+}
+.vshell-status-failed {
+  color: var(--vscode-errorForeground);
+}
+.vshell-status-canceled {
+  color: var(--vscode-descriptionForeground);
+}
+.vshell-status-done {
+  color: var(--vscode-foreground);
+}
+
+/* ---------- toast ---------- */
+.vshell-toast-host {
+  position: fixed;
+  right: 20px;
+  bottom: 76px;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+  pointer-events: none;
+}
+.vshell-toast {
+  max-width: 320px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-widget-border);
+  border-left: 3px solid var(--vscode-progressBar-background);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  opacity: 0;
+  transform: translateX(24px);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+.vshell-toast-in {
+  opacity: 1;
+  transform: none;
+}
+.vshell-toast-out {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.vshell-toast-error {
+  border-left-color: var(--vscode-errorForeground);
+}
+.vshell-toast-ok {
+  border-left-color: var(--vscode-charts-blue);
+}
+
+/* ---------- 弹窗 ---------- */
+/* v0.5.6 第十二轮需求 9（编号 9）：抖音刷全屏后浮窗不显示——feed 模拟
+   全屏 z-index 9999 盖住 backdrop（z 70）。浮窗提到 10000：全屏时点击
+   更换角色/解决冲突/添加角色照常弹出（在 feed 全屏之上） */
+.vshell-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: vshell-fade 0.15s ease;
+}
+.vshell-modal {
+  width: 420px;
+  max-width: 100%;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.5);
+  padding: 18px;
+  animation: vshell-pop 0.18s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.vshell-modal-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.vshell-modal-sub {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+}
+.vshell-modal-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vshell-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.vshell-radio.is-checked {
+  border-color: var(--vscode-focusBorder);
+  background: var(--vscode-list-hoverBackground);
+}
+.vshell-radio input {
+  accent-color: var(--vscode-focusBorder);
+  margin: 0;
+}
+.vshell-radio-label {
+  font-size: 13px;
+}
+.vshell-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* ---------- 设置页（v0.5.6 用户需求：导航栏设置按钮；v0.5.12 改页面
+ * #/settings——不再用浮窗，设置区直接铺在 .vshell-page 内容区） ----------
+ * 分组标题同角色面板 sec-title 语义（label2/descriptionForeground） */
+.vshell-settings-page {
+  max-width: 560px;
+}
+.vshell-settings-sec {
+  margin-bottom: 14px;
+}
+.vshell-settings-sec:last-child { margin-bottom: 0; }
+.vshell-settings-sec-title {
+  font-size: var(--vscode-fontSize-label2);
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 8px;
+}
+.vshell-settings-page .vshell-modal-opts { gap: 6px; }
+/* 预取倍率 k（v0.5.12：数据源列表顶部拖动条）——label 行 + slider 子块 */
+.vshell-settings-k {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+/* 清除观看记录二次确认态（同下载页 .vshell-dl-clearwatched.is-confirm） */
+.vshell-settings-data { display: flex; flex-direction: column; gap: 8px; }
+.vshell-settings-clear.is-confirm {
+  border-color: var(--vscode-errorForeground);
+  color: var(--vscode-errorForeground);
+  background: rgba(248, 81, 73, 0.08);
+}
+.vshell-settings-about {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+}
+/* 卡片间距拖动条（v0.5.6 用户需求：视频卡间距 + 分类卡下边距共用） */
+.vshell-settings-slider {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.vshell-settings-range {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--vscode-focusBorder);
+  cursor: pointer;
+}
+.vshell-settings-slider-val {
+  min-width: 36px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--vscode-foreground);
+}
+.vshell-settings-slider-hint {
+  flex-basis: 100%;
+  font-size: var(--vscode-fontSize-label2);
+  color: var(--vscode-descriptionForeground);
+}
+/* 数据源项（v0.5.6 插件数据源）：插件行删除钮 + 添加按钮 */
+.vshell-settings-sources { gap: 6px; }
+/* ---------- 数据源切换加载遮罩（v0.5.6 用户需求：切换后显示加载动画） ----------
+ * 挂 documentElement（boot 清 body 不影响）；颜色带 fallback（html 可能
+ * 尚未加 .vshell 类） */
+.vshell-switch-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(24, 24, 24, 0.92);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
+}
+.vshell-switch-overlay.is-shown { display: flex; }
+.vshell-switch-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--vscode-list-hoverBackground, #2a2d2e);
+  border-top-color: var(--vscode-charts-blue, #59a4f9);
+  animation: vshell-spin 0.8s linear infinite;
+}
+@keyframes vshell-spin { to { transform: rotate(360deg); } }
+.vshell-switch-text {
+  font-size: 13px;
+  color: var(--vscode-foreground, #cccccc);
+}
+/* 隐私标记按钮（v0.5.6 用户需求）：lock 图标——is-priv = 隐私数据源
+ * （启动时自动跳过）；默认 descriptionForeground 淡显，hover 高亮 */
+.vshell-settings-source-priv {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.75;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 2px;
+  padding: 0;
+  transition: background 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+.vshell-settings-source-priv:hover {
+  background: var(--vscode-toolbar-activeBackground);
+  opacity: 1;
+}
+.vshell-settings-source-priv.is-priv {
+  color: var(--vscode-errorForeground);
+  opacity: 1;
+}
+.vshell-settings-source-priv .codicon { font-size: 12px; }
+.vshell-settings-source-del {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  transition: background 120ms ease, color 120ms ease;
+}
+.vshell-settings-source-del:hover {
+  background: var(--vscode-toolbar-activeBackground);
+  color: var(--vscode-errorForeground);
+}
+.vshell-settings-source-del .codicon { font-size: 10px; }
+/* 数据源热更按钮（用户需求）：reload 后 ensureLoaded 重读文件注入最新源码 */
+.vshell-settings-source-reload {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 2px;
+  padding: 0;
+  transition: background 120ms ease, color 120ms ease;
+}
+.vshell-settings-source-reload:hover {
+  background: var(--vscode-toolbar-activeBackground);
+  color: var(--vscode-foreground);
+}
+.vshell-settings-source-reload .codicon { font-size: 12px; }
+.vshell-settings-source-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.vshell-settings-source-add .codicon { font-size: 12px; }
+
+/* ---------- 标签管理面板（v0.1.9 tag 系统；v0.3.74 简化版：Fluent Dialog 几何） ----------
+ * mimic: Dialog 480px / 列表行 48px 高 / 控制件圆角 4-6px —— 仿照
+ *   fluent 规范（设计演示页 _tag-demo.html 拍板稿）；配色全部 VS Code token */
+.vshell-tag-modal { width: 480px; }
+.vshell-tag-input-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.vshell-tag-input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;      /* v0.3.83：height 32px 含边框（content-box 下实际 34px 高于按钮 2px） */
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: 6px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  outline: none;
+  font-size: 13px;
+}
+.vshell-tag-input:focus {
+  border-color: var(--vscode-focusBorder);
+  box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+}
+/* 添加按钮：方形 + 号，与输入框等高（32px） */
+.vshell .vshell-tag-add {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 15px;
+}
+.vshell-tag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 264px;
+  overflow-y: auto;
+  /* v0.5.9 用户需求：角色列表不显示滚动条（仍可滚） */
+  scrollbar-width: none;
+}
+.vshell-tag-list::-webkit-scrollbar {
+  display: none;
+}
+.vshell-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 0 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.vshell-tag-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.vshell-tag-row.is-selected {
+  background: var(--vscode-list-activeSelectionBackground);
+}
+.vshell-tag-row.is-selected .vshell-tag-row-name,
+.vshell-tag-row.is-selected .vshell-tag-img-btn {
+  color: var(--vscode-list-activeSelectionForeground);
+}
+.vshell-tag-row-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vshell-tag-row-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.vshell-tag-row:hover .vshell-tag-row-actions,
+.vshell-tag-row.is-selected .vshell-tag-row-actions {
+  opacity: 1;
+}
+.vshell-tag-img-btn,
+.vshell-tag-row-del {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--vscode-foreground);
+  font-size: 13px;
+  transition: background 120ms ease, color 120ms ease;
+}
+.vshell-tag-img-btn:hover {
+  background: var(--vscode-toolbar-activeBackground);
+}
+.vshell-tag-row-del:hover {
+  background: var(--vscode-toolbar-activeBackground);
+  color: var(--vscode-errorForeground);
+}
+/* v0.3.0：tag 配图缩略图；v0.3.3：无图白底+首字（与卡片角标视觉一致） */
+.vshell-tag-thumb {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-descriptionForeground);
+  font-size: 14px;
+}
+.vshell-tag-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.vshell-tag-thumb.is-letter {
+  background: #fff;
+}
+.vshell-tag-thumb .vsc-video-tag-letter {
+  font-size: 14px;
+}
+.vshell-tag-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+.vshell-tag-foot-hint {
+  flex: 1;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+}
+/* ---------- 头像区域裁剪（v0.3.78 大视口 + 矩形选区） ----------
+ * Fluent 几何：大视口 320px 方形显示整图；居中 140px 矩形 = 头像区域
+ * （1px 白框 + 大扩散 box-shadow 压暗矩形外）；图片可缩放平移；
+ * 控制件 4px 圆角；配色全 token */
+.vshell-tag-crop-box {
+  width: 380px;
+}
+.vshell-tag-crop-viewport {
+  position: relative;
+  width: 320px;
+  height: 320px;
+  margin: 12px auto 0;
+  background: #000;
+  border-radius: 8px;              /* OverlayCornerRadius */
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+.vshell-tag-crop-viewport:active { cursor: grabbing; }
+.vshell-tag-crop-viewport img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+}
+.vshell-tag-crop-rect {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 140px;
+  height: 140px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(255, 255, 255, 0.9);   /* 头像框边界 */
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);  /* 矩形外压暗 */
+  pointer-events: none;
+  z-index: 2;
+}
+.vshell-tag-crop-zoom {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.vshell-tag-crop-zoom .vshell-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+}
+/* 填充色选择（白/黑，用户需求）：12px 色块 + 选中高亮 */
+.vshell-tag-crop-fillsep {
+  width: 1px;
+  height: 16px;
+  background: var(--vscode-sideBar-border);
+  margin: 0 2px;
+}
+.vshell-tag-crop-fillbtn.is-active {
+  border-color: var(--vscode-focusBorder);
+}
+.vshell-tag-crop-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  display: inline-block;
+}
+.vshell-tag-crop-swatch.is-black {
+  background: #000;
+}
+.vshell-tag-crop-swatch.is-white {
+  background: #fff;
+  border-color: rgba(0, 0, 0, 0.4);
+}
+.vshell-tag-crop-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+/* ---- 背景图中心点选择界面（v0.5.6 第六轮：不裁剪，指定中心点） ---- */
+.vshell-bannerpick-box {
+  width: 680px;
+}
+.vshell-bannerpick-vp {
+  position: relative;
+  width: 640px;
+  height: 360px;
+  background: #000;
+  border-radius: var(--vscode-cornerRadius-medium);
+  border: 1px solid var(--vscode-panel-border);
+  overflow: hidden;
+  cursor: crosshair;
+  margin: 12px auto 0;
+}
+.vshell-bannerpick-vp img {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+}
+/* 十字准星（中心点标记）：横竖两条线 + 中心小圆 */
+.vshell-bannerpick-cross {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 2;
+}
+.vshell-bannerpick-cross::before,
+.vshell-bannerpick-cross::after {
+  content: '';
+  position: absolute;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+}
+.vshell-bannerpick-cross::before {
+  left: 50%;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  transform: translateX(-50%);
+}
+.vshell-bannerpick-cross::after {
+  top: 50%;
+  left: 0;
+  height: 2px;
+  width: 100%;
+  transform: translateY(-50%);
+}
+.vshell-bannerpick-cross .vshell-bannerpick-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid rgba(0, 0, 0, 0.7);
+  transform: translate(-50%, -50%);
+}
+
+/* ---------- 空态 / 骨架 ---------- */
+.vshell-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 20px;
+  color: var(--vscode-descriptionForeground);
+  grid-column: 1 / -1;
+}
+.vshell-empty-icon {
+  font-size: 42px;
+  opacity: 0.55;
+}
+.vshell-empty-text {
+  font-size: 14px;
+}
+.vshell-detail-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 0;
+}
+.vshell-skeleton-block {
+  background: var(--vscode-list-hoverBackground);
+  border-radius: 10px;
+  animation: vshell-pulse 1.3s ease-in-out infinite;
+}
+.vshell-skeleton-player {
+  aspect-ratio: 16 / 9;
+}
+.vshell-skeleton-line {
+  height: 14px;
+  border-radius: 6px;
+  background: var(--vscode-list-hoverBackground);
+  animation: vshell-pulse 1.3s ease-in-out infinite;
+}
+
+/* ================= 角色系统（v0.5.0，标签升级） ================= */
+
+/* ---- 角色管理面板：VS Code Modern 两栏（用户拍板方案 B，v0.5.2） ----
+ * 几何：mimic 卡片/浮层——surface-background 底 + sideBar-border 1px +
+ * cornerRadius-large + shadow-lg（floating-panels.css:24）；两栏 = sidebar+content
+ * 布局（左 220px 固定 + 右 flex，vscode-modern-ui 布局纪律） */
+.vshell-char-panel {
+  width: 640px;
+}
+.vshell-char-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--vscode-sideBar-border);
+}
+.vshell-char-head > .codicon {
+  color: var(--vscode-descriptionForeground);
+  font-size: 15px;
+}
+.vshell-char-title {
+  flex: 1;
+  font-size: var(--vscode-fontSize-body1);
+  font-weight: var(--vscode-fontWeight-semiBold);
+}
+.vshell-char-close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--vscode-cornerRadius-small);
+  color: var(--vscode-foreground);
+  font-size: 13px;
+  transition: background 120ms ease;
+}
+.vshell-char-close:hover {
+  background: var(--vscode-toolbar-activeBackground);
+}
+.vshell-char-body {
+  display: flex;
+  min-height: 320px;
+  max-height: 62vh;
+}
+.vshell-char-side {
+  width: 220px;
+  flex: none;
+  border-right: 1px solid var(--vscode-sideBar-border);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vshell-char-addrow {
+  display: flex;
+  gap: 4px;
+}
+.vshell-char-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* v0.5.9 用户需求：角色管理页左侧列表不显示滚动条（仍可滚） */
+  scrollbar-width: none;
+}
+.vshell-char-list::-webkit-scrollbar {
+  display: none;
+}
+.vshell-char-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 8px;
+  border-radius: var(--vscode-cornerRadius-small);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.vshell-char-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.vshell-char-row.is-selected {
+  background: var(--vscode-list-activeSelectionBackground);
+}
+.vshell-char-row.is-selected .vshell-char-row-name {
+  color: var(--vscode-list-activeSelectionForeground);
+}
+.vshell-char-row .vshell-tag-thumb {
+  width: 30px;
+  height: 30px;
+}
+.vshell-char-row-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--vscode-fontSize-body1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vshell-char-kwcount {
+  flex: none;
+  font-size: var(--vscode-fontSize-label2);
+  color: var(--vscode-badge-foreground);
+  background: var(--vscode-badge-background);
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+/* 行删除按钮：**常驻显示**（用户需求：不要悬停显示）；
+   v0.5.6 用户需求：x 太大 → 24px/12px icon 缩到 20px/10px；
+   v0.5.6 追加：再缩小一半 → 10px（用户反馈仍偏大）；
+   再追加：x 的大小**不在这里控制**（用户：不是 .vshell .vshell-char-row-del，
+   而是 codicon codicon-close）——本规则只管按钮几何，font-size 回退；
+   x 尺寸由下方 .vshell-char-row-del.codicon-close 专用规则控制；
+   .vshell 前缀（0,2,0）压过 base .vshell button{font:inherit}（0,1,1）——
+   无前缀时 font-size 被 font:inherit 覆盖（实测继承 13px） */
+.vshell .vshell-char-row-del {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--vscode-cornerRadius-small);
+  color: var(--vscode-descriptionForeground);
+  transition: background 120ms ease, color 120ms ease;
+}
+/* x 图标大小：**内部 span.codicon codicon-close**（按钮自身无 codicon 类，
+   x 是子元素；0,3,0 压过 codicon 基类 0,2,0 的 16px） */
+.vshell .vshell-char-row-del .codicon-close {
+  font-size: 10px;
+}
+.vshell-char-row-del:hover {
+  color: var(--vscode-errorForeground);
+  background: var(--vscode-toolbar-activeBackground);
+}
+.vshell-char-main {
+  flex: 1;
+  min-width: 0;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+.vshell-char-detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* v0.5.6 第六轮：背景图直接作 detail-idrow 的背景（用户需求 1——不再是
+ * 单独一行预览）；无自定义图 = 手绘默认 SVG/主题渐变。has-bg 时暗色遮罩
+ * 已保证深底 → 名字提亮 */
+.vshell-char-detail-idrow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 88px;
+  padding: 14px 16px;
+  border-radius: var(--vscode-cornerRadius-large);
+  overflow: hidden;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-editor-background);
+  background-size: cover;
+  background-position: center;
+}
+.vshell-char-detail-idrow.has-bg .vshell-char-dname {
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+.vshell .vshell-char-banner-set {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 13px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.vshell .vshell-char-banner-set:hover {
+  background: rgba(0, 0, 0, 0.65);
+  transform: none;
+}
+.vshell .vshell-char-banner-set .codicon {
+  font-size: 13px;
+}
+.vshell-char-dname {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  z-index: 1;
+}
+/* v0.5.9：角色名行（名称 + 改名编辑钮；编辑态 = 输入框 + 确认/取消） */
+.vshell-char-dname-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  z-index: 1;
+}
+.vshell-char-dname-row .vshell-char-dname {
+  flex: 1;
+}
+.vshell .vshell-char-name-edit {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+}
+.vshell .vshell-char-name-edit:hover {
+  color: var(--vscode-foreground);
+  background: rgba(127, 127, 127, 0.25);
+  transform: none;
+}
+.vshell-char-name-input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-focusBorder);
+  border-radius: var(--vscode-cornerRadius-small);
+  outline: none;
+}
+.vshell .vshell-char-name-confirm,
+.vshell .vshell-char-name-cancel {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 12px;
+}
+.vshell .vshell-char-name-confirm {
+  color: var(--vscode-terminal-ansiGreen);
+}
+.vshell .vshell-char-name-cancel {
+  color: var(--vscode-terminal-ansiRed);
+}
+.vshell-char-bigthumb {
+  width: 64px;
+  height: 64px;
+  flex: none;
+  border-radius: var(--vscode-cornerRadius-large);
+  /* v0.5.6 用户需求：点击头像编辑图片 + 悬停压暗/显示 icon（样式见下） */
+}
+/* 头像编辑入口（v0.5.6）：包一层按钮，悬停压暗 + 浮现编辑 icon */
+.vshell-char-bigthumb-wrap {
+  position: relative;
+  flex: none;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  cursor: pointer;
+}
+.vshell-char-bigthumb-wrap:hover .vshell-char-bigthumb img {
+  filter: brightness(0.6);
+}
+.vshell-char-bigthumb-hover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: var(--vscode-cornerRadius-large);
+  color: #fff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.vshell-char-bigthumb-wrap:hover .vshell-char-bigthumb-hover {
+  opacity: 1;
+}
+.vshell-char-bigthumb.is-letter {
+  border: 1px solid var(--vscode-sideBar-border);
+  font-size: 28px;
+}
+.vshell-char-sec {
+  border-top: 1px solid var(--vscode-sideBar-border);
+  padding-top: 12px;
+}
+.vshell-char-sec-title {
+  font-size: var(--vscode-fontSize-label2);
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 8px;
+}
+/* v0.5.6 第五轮：原「主页背景图」独立栏样式已删（bannerrow/bannerbtn）——
+ *  预览与设置按钮移入 .vshell-char-detail-head */
+.vshell-char-kwline,
+.vshell-char-exline {                 /* v0.5.9：排除词行与关键词行同构 */
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.vshell-char-kwchip {
+  position: relative;             /* 删除钮骑跨右上角（同搜索胶囊） */
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--vscode-cornerRadius-large);
+  background: var(--vscode-toolbar-hoverBackground);
+  font-size: 12px;
+  color: var(--vscode-foreground);
+}
+.vshell-char-kwchip.is-fixed {
+  opacity: 0.72;                  /* 角色名自身不可删 */
+}
+/* 删除钮 = 搜索胶囊同款（.vshell-st-chip-del 样式已定义于导航栏段）：
+ * 默认隐藏、悬停 chip 浮现；hover 变红 */
+.vshell .vshell-char-kwchip:hover .vshell-st-chip-del,
+.vshell .vshell-char-kwchip .vshell-st-chip-del:focus-visible {
+  opacity: 1;
+}
+.vshell-char-kwadd {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.vshell-char-kwadd .vshell-tag-input {
+  flex: 1;
+  height: 28px;
+  font-size: 13px;
+}
+.vshell-char-kwadd .vshell-tag-add {
+  width: 28px;
+  height: 28px;
+  flex: none;
+}
+.vshell-char-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 8px;
+}
+.vshell-char-btn {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--vscode-cornerRadius-small);
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 120ms ease, filter 120ms ease;
+}
+.vshell-char-btn .codicon {
+  font-size: 14px;
+}
+.vshell-char-btn-pri {
+  border: none;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+.vshell-char-btn-pri:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+.vshell-char-btn-img {
+  border: 1px solid var(--vscode-input-border);
+  background: transparent;
+  color: var(--vscode-foreground);
+}
+.vshell-char-btn-img:hover {
+  background: var(--vscode-toolbar-activeBackground);
+}
+.vshell-char-btn-del {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--vscode-errorForeground);
+}
+.vshell-char-btn-del:hover {
+  background: rgba(248, 81, 73, 0.12);
+}
+
+/* ---- 角色选择/编辑弹窗（char-picker）：行是 button（重置默认样式）+ 当前高亮 ---- */
+/* v0.5.5 Fluent Dialog 重设计：Smoke 遮罩 blur（Mica/Acrylic 类材质，
+   fallback 纯色 rgba(0,0,0,0.5) 已有）；弹窗 8px OverlayCornerRadius；
+   完成主按钮右下角（Fluent Dialog 主按钮布局） */
+.vshell-picker-backdrop {
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+.vshell-char-picker {
+  border-radius: 8px;               /* OverlayCornerRadius（Fluent） */
+  padding: 20px;                    /* 4px 网格（Fluent spacing lg） */
+}
+.vshell-char-picker .vshell-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+/* 完成（主按钮）推右下角：还原/移除角色靠左，主按钮靠右（char-picker + char-panel 统一） */
+.vshell-char-picker .vshell-tag-foot .vshell-btn-primary,
+.vshell-char-panel .vshell-tag-foot .vshell-btn-primary {
+  margin-left: auto;
+}
+.vshell-char-list .vshell-tag-row {
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 13px;
+  color: var(--vscode-foreground);
+}
+.vshell-char-list .vshell-tag-row.is-current {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+.vshell-char-list .vshell-tag-row.is-current .vshell-tag-row-name {
+  color: var(--vscode-list-activeSelectionForeground);
+}
+/* v0.5.3：冲突选择弹窗——冲突候选红色高亮（置顶显示）；
+   v0.5.6：加 inset 左竖条作冲突标记（选中态下仍可见，支撑「冲突/选中同显」） */
+.vshell-char-list .vshell-tag-row.is-conflict {
+  background: rgba(248, 81, 73, 0.12);
+  color: var(--vscode-errorForeground);
+  box-shadow: inset 3px 0 0 var(--vscode-errorForeground);
+}
+.vshell-char-list .vshell-tag-row.is-conflict .vshell-tag-row-name {
+  color: var(--vscode-errorForeground);
+  font-weight: 600;
+}
+/* v0.5.6 用户需求：冲突样式与选择样式**同显**——选中冲突角色后：
+   蓝底（选择样式）+ 红字/红竖条（冲突样式）并存；替换 v0.5.5 的
+   「蓝底+蓝字」组合规则（用户反馈点击后冲突感完全消失） */
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-conflict.is-current {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-errorForeground);
+  box-shadow: inset 3px 0 0 var(--vscode-errorForeground);   /* 冲突标记保留 */
+}
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-conflict.is-current .vshell-tag-row-name {
+  color: var(--vscode-errorForeground);   /* 红字保留在蓝底上 */
+  font-weight: 600;
+}
+
+/* v0.5.6 第十一轮（用户需求 1）：选择页/角色列表改**两列长条**——
+   长条背景 = 角色背景图（JS inline：暗渐变遮罩 + 图），左侧头像 +
+   名字，右侧关注按钮（仅角色列表浮窗）；选中高亮重新设计（focusBorder
+   蓝框 + ✓ 徽章——长条有图，原整卡蓝底会盖掉背景图），冲突标识复用
+   （红竖条 + 红 tint 蒙层 + 红字）。
+   仅 .vshell-char-picker 内的列表（char-panel 左栏 .vshell-char-list
+   仍为横排行，不受影响） */
+.vshell-char-picker .vshell-char-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.vshell-char-picker .vshell-char-list .vshell-tag-row {
+  width: 100%;
+  height: 56px;
+  flex-direction: row;
+  gap: 10px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--vscode-panel-border);
+  box-sizing: border-box;
+  position: relative;
+  overflow: hidden;
+  /* 背景图 JS 内联；background 不在这里设——is-conflict 红 tint /
+     is-current 状态需叠加（JS 的 backgroundImage 在 CSS background-color
+     之下，纯 background-color 会被图盖住不可见 → 冲突 tint 用 inset 蒙层） */
+}
+/* 名字：白字 + 投影（背景图上可读） */
+.vshell-char-picker .vshell-char-list .vshell-tag-row-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 头像：圆形（长条左侧） */
+.vshell-char-picker .vshell-char-list .vshell-tag-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 15px;
+  flex: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+/* 选中（v0.5.6 第十一轮重新设计：focusBorder 蓝框 + ✓ 徽章；覆盖通用
+   is-current 蓝底——长条要显示背景图，不能用整卡蓝底）
+   v0.5.6 第十二轮需求 4：**选中不改变框线颜色**——只显示对勾徽章；
+   对勾改 **SVG 平直对勾**（polyline 折线，butt 线帽 + miter 连接，无弧度；
+   不用 emoji ✓ 字符） */
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-current {
+  background: transparent;
+}
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-current::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: var(--vscode-list-activeSelectionBackground);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpolyline points='2.5,9 6,12.5 13.5,3.5' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='butt' stroke-linejoin='miter'/%3E%3C/svg%3E");
+  background-size: 12px 12px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+/* 冲突（复用）：红竖条 + 红 tint 蒙层（inset 大矩形盖在背景图上）+
+   红字 */
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-conflict {
+  background: transparent;
+  box-shadow:
+    inset 3px 0 0 var(--vscode-errorForeground),
+    inset 0 0 0 999px rgba(248, 81, 73, 0.16);
+  color: var(--vscode-errorForeground);
+}
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-conflict .vshell-tag-row-name {
+  color: var(--vscode-errorForeground);
+  font-weight: 600;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+}
+/* 冲突 + 选中同显：✓ 徽章 + 红竖条/红 tint/红字并存（v0.5.6 第十二轮
+   需求 4：选中不改框线——只靠对勾徽章标识选中） */
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-conflict.is-current {
+  background: transparent;
+  box-shadow:
+    inset 3px 0 0 var(--vscode-errorForeground),
+    inset 0 0 0 999px rgba(248, 81, 73, 0.12);
+}
+/* hover：普通 = 白提亮 + focusBorder 描边；冲突 = 红 tint 加深；
+   选中 = 无框线变化（只保留对勾徽章） */
+.vshell-char-picker .vshell-char-list .vshell-tag-row:hover {
+  border-color: var(--vscode-focusBorder);
+  box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0.08);
+}
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-conflict:hover {
+  border-color: var(--vscode-errorForeground);
+  box-shadow:
+    inset 3px 0 0 var(--vscode-errorForeground),
+    inset 0 0 0 999px rgba(248, 81, 73, 0.32);
+}
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-current:hover {
+  border-color: var(--vscode-panel-border);
+  box-shadow: none;
+}
+/* 关注按钮（角色列表浮窗长条右侧；v0.5.6 第十二轮需求 3：is-followed
+   背景不变——保持半透明底，只图标变对勾） */
+.vshell-char-picker .vshell-tag-follow {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.vshell-char-picker .vshell-tag-follow .codicon {
+  font-size: 13px;
+}
+.vshell-char-picker .vshell-tag-follow:hover {
+  background: rgba(0, 0, 0, 0.72);
+}
+.vshell-char-picker .vshell-tag-follow.is-popping .codicon {
+  animation: vshell-follow-in 180ms ease;
+}
+.vshell-char-picker .vshell-tag-follow.is-followed {
+  color: #fff;
+}
+/* v0.5.6 第二十一轮需求 3：已关注角色的**右上角红圆点**（样式同视频卡
+   收藏圆点 .is-fav——errorForeground 小圆点；is-on 控制显隐） */
+.vshell-char-picker .vshell-tag-followed-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--vscode-errorForeground);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  display: none;
+}
+.vshell-char-picker .vshell-tag-followed-dot.is-on {
+  display: block;
+}
+/* 标题行（含右侧「打开角色管理」按钮） */
+.vshell-modal-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.vshell-modal-title-row .vshell-modal-title {
+  margin: 0;
+}
+.vshell-char-manage {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  padding: 3px 10px;
+}
+.vshell-char-manage .codicon {
+  font-size: 13px;
+}
+
+/* ---- 卡片左上角角标：冲突态（点击处理） ---- */
+.vsc-video-tag-icon.is-conflict {
+  cursor: pointer;
+  color: var(--vscode-errorForeground);
+  font-size: 20px;
+  border: 1px solid rgba(248, 81, 73, 0.45);
+  /* v0.5.5 用户需求：冲突图标背景 #181818 不透明（原 rgba(0,0,0,0.45) 半透明可见卡片图） */
+  background: #181818;
+}
+.vshell-theme-light .vsc-video-tag-icon.is-conflict {
+  background: #fff;
+}
+
+/* ---- 抖音刷页头像：冲突 icon 可点击 / 角色首字回退（白底圆形） ---- */
+.vshell-feed-avatar.is-conflict {
+  cursor: pointer;
+  color: var(--vscode-errorForeground);
+  font-size: 20px;
+  border: 1px solid rgba(248, 81, 73, 0.45);
+  /* v0.5.5 用户需求：冲突头像背景 #181818 不透明（原 rgba(255,255,255,0.16) 半透明） */
+  background: #181818;
+}
+/* v0.5.3：无角色 → + 号添加按钮（与详情页 is-add 同款 dashed 圆形） */
+.vshell-feed-avatar.is-add {
+  cursor: pointer;
+  border: 1px dashed var(--vscode-sideBar-border);
+  color: var(--vscode-descriptionForeground);
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.vshell-feed-avatar.is-add:hover {
+  background: var(--vscode-toolbar-activeBackground);
+  border-color: var(--vscode-focusBorder);
+  color: var(--vscode-foreground);
+}
+.vshell-feed-avatar-letter {
+  width: 100%;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #fff;
+  color: #181818;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* ===== 本地视频导入浮窗（v0.5.6 第十二轮需求 2） ===== */
+.vshell-local-panel {
+  width: 520px;
+}
+.vshell-local-drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 22px 12px;
+  border: 1px dashed var(--vscode-sideBar-border);
+  border-radius: var(--vscode-cornerRadius-medium);
+  color: var(--vscode-descriptionForeground);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+.vshell-local-drop .codicon {
+  font-size: 18px;
+}
+.vshell-local-drop:hover,
+.vshell-local-drop.is-dragover {
+  border-color: var(--vscode-focusBorder);
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-foreground);
+}
+.vshell-local-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.vshell-local-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--vscode-cornerRadius-medium);
+  transition: background 120ms ease;
+}
+.vshell-local-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.vshell-local-thumb {
+  width: 64px;
+  height: 36px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex: none;
+  background: var(--vscode-input-background);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vscode-descriptionForeground);
+}
+.vshell-local-thumb .codicon {
+  font-size: 16px;
+}
+.vshell-local-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.vshell-local-info {
+  flex: 1;
+  min-width: 0;
+}
+.vshell-local-title {
+  font-size: 13px;
+  color: var(--vscode-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vshell-local-sub {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 2px;
+}
+.vshell .vshell-local-del {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+}
+.vshell .vshell-local-del .codicon {
+  font-size: 12px;
+}
+.vshell-local-empty {
+  padding: 26px 12px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+/* ===== 视频嗅探面板（v0.5.6 第二十七轮，FetchV 式） ===== */
+.vshell-sniffer-panel {
+  width: 560px;
+  max-width: calc(100vw - 48px);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+}
+.vshell-sniffer-panel .vshell-modal-title-row {
+  flex: none;
+}
+.vshell .vshell-sniff-rescan {
+  margin-left: auto;
+  padding: 3px 10px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.vshell-sniff-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+}
+/* v0.5.6 第二十八轮：URL 直链输入行（FetchV 式） */
+.vshell-sniff-urlrow {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.vshell-sniff-urlrow .vshell-sniff-url {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  font-size: 12px;
+  padding: 0 8px;
+}
+.vshell .vshell-sniff-urldl {
+  flex: none;
+  padding: 3px 12px;
+  font-size: 12px;
+  min-width: 56px;
+  text-align: center;
+}
+.vshell-sniff-empty {
+  padding: 30px 12px;
+  text-align: center;
+}
+.vshell-sniff-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-editor-background);
+}
+.vshell-sniff-row > .codicon {
+  flex: none;
+  font-size: 18px;
+  color: var(--vscode-descriptionForeground);
+}
+.vshell-sniff-info {
+  flex: 1;
+  min-width: 0;
+}
+.vshell-sniff-title {
+  font-size: 13px;
+  color: var(--vscode-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vshell-sniff-meta {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vshell .vshell-sniff-dl {
+  flex: none;
+  padding: 3px 12px;
+  font-size: 12px;
+  min-width: 64px;
+  text-align: center;
+}
+.vshell .vshell-sniff-dl:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html class="vshell theme-dark">
+<head>
+<meta charset="utf-8">
+<title>vshell popover click test</title>
+<style>html,body{margin:0;background:#181818;height:100%;}</style>
+</head>
+<body>
+<script>
+// 最小 seed：卡片标签（浮层 body 内容）+ 主题
+var mem = {
+  'vshell.tags': [{ name: '视频', icon: '' }, { name: '演示', icon: '' }],
+  'vshell.theme': 'dark',
+};
+try { localStorage.setItem('vshell.mem', JSON.stringify(mem)); } catch (e) {}
+</script>
+<script src="_vs-fixtures/mock-adapter.js"></script>
+<script src="vshell.user.js"></script>
+</body>
+</html>

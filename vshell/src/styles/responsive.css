@@ -1,0 +1,248 @@
+/* ============================================================
+ * responsive — 响应式断点（桌面为主 + 移动适配）
+ * ============================================================ */
+
+/* 中屏：详情页侧栏固定 300px（1/4 比例在窄屏太挤） */
+@media (max-width: 1280px) {
+  .vshell-detail-layout {
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 30px;                          /* 用户需求：gap 统一 30px（含中屏断点） */
+  }
+}
+
+/* 中屏 */
+@media (max-width: 1080px) {
+  .vshell-outlet {
+    /* 顶部必须保留 56px 悬浮导航栏让位（曾漏掉被 fixed 导航栏挡内容） */
+    padding: 56px 0 48px;
+  }
+  .vshell-page {
+    padding: 0 14px;
+  }
+  .vshell-page-detail {
+    /* 单列落回普通页面流：恢复页面滚动（固定视口高仅桌面两栏适用） */
+    height: auto;
+    overflow: visible;
+    padding: 0;
+  }
+  .vshell-detail-layout {
+    flex: none;
+    min-height: 0;
+  }
+  .vshell-detail-side {
+    overflow: visible;                  /* 相关列表不再独立滚动，随页面滚动 */
+  }
+  .vshell-wall {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: var(--vshell-card-gap, 6px);
+  }
+  .vshell-nav-search {
+    max-width: 320px;
+  }
+  /* 窄屏：角色页 10% 边距回退为紧凑边距（与 .vshell-page 一致） */
+  .vshell-role-page {
+    padding: 20px 14px 48px;
+  }
+  /* 窄屏：代表作 640px 卡不溢出视口（媒体区 aspect-ratio 16/9 自动缩放高度） */
+  .vshell-role-marquee .vshell-role-mcard2 {
+    width: min(640px, calc(100vw - 28px));
+  }
+  /* 详情页落回单列：主视频优先，相关推荐移到下方 */
+  .vshell-detail-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}
+
+/* 平板/手机 */
+@media (max-width: 768px) {
+  /* 移动端隐藏页面滚动条（用户需求）：触摸滚动为主，滚动条视觉冗余 */
+  .vshell-page::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  /* 移动端导航重构（用户需求）：vshell 字样/版本号隐藏；右端 7 个操作按钮
+     整体移到底部工具条；顶部仅保留 [模式钮 搜索框 布局钮]
+     （home 按钮一并隐藏——顶部只留搜索与两个显示模式切换按钮） */
+  .vshell-nav-brand { display: none; }
+  .vshell-nav-home { display: none; }
+  .vshell-nav-mode { order: 1; }
+  .vshell-nav-center { order: 2; }
+  .vshell-nav-layout { order: 3; margin-left: 0; }
+  .vshell-nav-actions {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;                 /* 视口底部（挂 body 直系，无 backdrop-filter 吞定位） */
+    top: auto;
+    height: 52px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    background: rgba(24, 24, 24, 0.92);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--vscode-panel-border);
+    z-index: 60;               /* 与导航栏同层 */
+  }
+  .vshell.theme-light .vshell-nav-actions {
+    background: rgba(255, 255, 255, 0.92);
+  }
+  .vshell-nav-actions .vshell-nav-btn {
+    flex: 1;
+    justify-content: center;
+    padding: 0;
+    height: 100%;
+    border-radius: 0;
+  }
+  /* 桌面 rules 的 margin-left:auto 在固定工具条内不适用（flex:1 均分） */
+  .vshell-nav-actions .vshell-nav-btn:first-child {
+    margin-left: 0;
+  }
+  /* 底部工具条让位：页面内容/FAB/feed 动作列/toast/全屏隐藏 */
+  .vshell-outlet { padding-bottom: 64px; }
+  .vshell-fab { bottom: 70px; }
+  .vshell-feed-actions { bottom: 108px; }
+  .vshell-toast-host { bottom: 130px; }
+  .vshell-fs .vshell-nav-actions { display: none; }
+  /* feed 页自身滚动容器：高度减去底部工具条，最后一张卡不被遮挡 */
+  .vshell-page-watchlist:has(.vshell-feed),
+  .vshell-page-home:has(.vshell-feed),
+  .vshell-page-search:has(.vshell-feed),
+  .vshell-page-blacklist:has(.vshell-feed),
+  .vshell-page-searchtags:has(.vshell-feed) {
+    height: calc(100dvh - 108px);
+  }
+  .vshell-navbar {
+    padding: 8px 10px;
+    gap: 6px;
+  }
+  .vshell-nav-brand-text {
+    display: none;
+  }
+  .vshell-nav-center {
+    position: static;          /* 小屏：居中容器回文档流，flex:1 撑满（home 仍贴搜索框左侧） */
+    left: auto;
+    transform: none;
+    flex: 1;
+    min-width: 0;
+  }
+  .vshell-nav-search {
+    flex: 1;
+    width: auto;
+    max-width: none;
+    margin-left: 4px;
+  }
+  /* v0.3.41：is-open 类与规则已废弃（覆盖路线——浮层 absolute 相对搜索框，
+     移动端搜索框 flex:1 时浮层自然跟随其宽度，无需覆盖） */
+  .vshell-nav-btn {
+    padding: 0 8px;
+  }
+  .vshell-wall {
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: var(--vshell-card-gap, 6px);
+  }
+  .vshell-detail-title {
+    font-size: 17px;
+  }
+  .vshell-detail-related-thumb {
+    width: 128px;
+  }
+  .vshell-dl-thumb {
+    width: 88px;
+    height: 50px;
+  }
+  .vshell-downloads-controls {
+    gap: 8px;
+  }
+  .vshell-feed-actions {
+    right: 6px;
+    bottom: 48px;
+    gap: 12px;
+  }
+  .vshell-fab {
+    right: 14px;
+    bottom: 14px;
+  }
+  .vshell-page-head {
+    flex-wrap: wrap;
+  }
+}
+
+/* 手机窄屏 */
+@media (max-width: 480px) {
+  .vshell-wall {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--vshell-card-gap, 6px);
+  }
+  .vshell-modal {
+    padding: 14px;
+  }
+  .vshell-fab-drawer {
+    width: calc(100vw - 28px);
+  }
+  .vshell-toast-host {
+    right: 14px;
+    left: 14px;
+    align-items: stretch;
+  }
+  .vshell-toast {
+    max-width: none;
+  }
+  .vshell-watchlist-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .vshell-watchlist-views {
+    align-self: flex-end;
+  }
+  .vshell-dl-card {
+    flex-direction: row;
+    gap: 10px;
+  }
+  .vshell-dl-thumb {
+    width: 76px;
+    height: 43px;
+  }
+  /* 移动端：导航按钮收窄（7 个按钮 + 搜索框在窄屏共用一行） */
+  .vshell-nav-btn {
+    padding: 0 6px;
+  }
+  /* 弹窗留边（modal width 固定 420-640，max-width 100% 相对视口 → 补 28px 保险） */
+  .vshell-modal {
+    max-width: calc(100vw - 28px);
+  }
+  /* 背景图中心点选择器固定 640×360 → 自适应缩放 */
+  .vshell-bannerpick-vp {
+    width: calc(100vw - 56px);
+    max-width: 640px;
+    height: auto;
+    aspect-ratio: 16 / 9;
+  }
+}
+
+/* 超窄（手机竖屏最窄档）：墙单列 + 导航按钮再收窄 */
+@media (max-width: 400px) {
+  .vshell-wall {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--vshell-card-gap, 6px);
+  }
+  .vshell-nav-btn {
+    padding: 0 4px;
+  }
+  .vshell-nav-search {
+    min-width: 0;
+  }
+}
+
+/* 触屏设备：无 hover → 卡片动作常显 */
+@media (hover: none) {
+  .vsc-video-actions {
+    opacity: 1;
+  }
+  .vsc-video-shade {
+    opacity: 1;
+  }
+}

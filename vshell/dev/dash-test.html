@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>dash.js 对照测试</title>
+</head>
+<body>
+<pre id="log">running…</pre>
+<video id="v" width="320" height="180" muted></video>
+<script src="/_vs-fixtures/dash.all.min.js"></script>
+<script>
+(function () {
+  var log = document.getElementById('log');
+  function L(s) { log.textContent += '\n' + s; console.log(s); }
+  function post(d) {
+    d.log = log.textContent;
+    fetch('/__diag', { method: 'POST', body: JSON.stringify(d) }).catch(function () {});
+  }
+
+  function scanBoxes(ab) {
+    var dv = new DataView(ab);
+    var pos = 0, initEnd = -1, sidxStart = -1, sidxEnd = -1;
+    while (pos + 8 <= ab.byteLength) {
+      var size = dv.getUint32(pos);
+      var type = String.fromCharCode(dv.getUint8(pos + 4), dv.getUint8(pos + 5), dv.getUint8(pos + 6), dv.getUint8(pos + 7));
+      var end = size === 1 ? pos + Number(dv.getBigUint64(pos + 8)) : pos + size;
+      if (type === 'ftyp' || type === 'moov') initEnd = end - 1;
+      if (type === 'sidx') { if (sidxStart < 0) sidxStart = pos; sidxEnd = end - 1; }
+      if (size <= 0) break;
+      pos = end;
+      if (pos >= ab.byteLength) break;
+    }
+    return { init: '0-' + Math.max(0, initEnd), idx: sidxStart + '-' + sidxEnd };
+  }
+
+  function buildMyMpd() {
+    // 与 player.js buildMpd 完全一致的构造（mock playInfo 形态）
+    return Promise.all([
+      fetch('/_vs-fixtures/video.m4s').then(function (r) { return r.arrayBuffer(); }),
+      fetch('/_vs-fixtures/audio.m4s').then(function (r) { return r.arrayBuffer(); }),
+    ]).then(function (bufs) {
+      var v = scanBoxes(bufs[0]);
+      var a = scanBoxes(bufs[1]);
+      var esc = function (s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); };
+      var parts = [];
+      parts.push('<?xml version="1.0" encoding="UTF-8"?>');
+      parts.push('<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011" mediaPresentationDuration="PT6.000S" minBufferTime="PT1.5S">');
+      parts.push('<Period>');
+      parts.push('<AdaptationSet mimeType="video/mp4" segmentAlignment="true">');
+      parts.push('<Representation id="video" mimeType="video/mp4" codecs="avc1.64001f" bandwidth="900000" width="640" height="360">');
+      parts.push('<BaseURL>' + esc(location.origin + '/_vs-fixtures/video.m4s') + '</BaseURL>');
+      parts.push('<SegmentBase indexRange="' + v.idx + '">');
+      parts.push('<Initialization range="' + v.init + '" />');
+      parts.push('</SegmentBase></Representation></AdaptationSet>');
+      parts.push('<AdaptationSet mimeType="audio/mp4" segmentAlignment="true">');
+      parts.push('<Representation id="audio" mimeType="audio/mp4" codecs="mp4a.40.2" bandwidth="128000" audioSamplingRate="44100">');
+      parts.push('<BaseURL>' + esc(location.origin + '/_vs-fixtures/audio.m4s') + '</BaseURL>');
+      parts.push('<SegmentBase indexRange="' + a.idx + '">');
+      parts.push('<Initialization range="' + a.init + '" />');
+      parts.push('</SegmentBase></Representation></AdaptationSet>');
+      parts.push('</Period></MPD>');
+      return new Blob([parts.join('\n')], { type: 'application/dash+xml' });
+    });
+  }
+
+  function runPlayer(video, url, name, done) {
+    var p = dashjs.MediaPlayer().create();
+    p.on(dashjs.MediaPlayer.events.ERROR, function (e) {
+      L(name + ' ERROR: ' + JSON.stringify(e && e.error) + ' ' + (e && e.message));
+    });
+    p.on(dashjs.MediaPlayer.events.PLAYBACK_ERROR, function () { L(name + ' PLAYBACK_ERROR'); });
+    p.on(dashjs.MediaPlayer.events.CAN_PLAY, function () { L(name + ' CAN_PLAY'); });
+    p.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, function () { L(name + ' STREAM_INITIALIZED'); });
+    p.initialize(video, url, true);
+    setTimeout(function () {
+      var s = { readyState: video.readyState, vw: video.videoWidth, vh: video.videoHeight, ct: video.currentTime, paused: video.paused, err: video.error ? video.error.code : null };
+      L(name + ' state: ' + JSON.stringify(s));
+      done();
+    }, 6000);
+  }
+
+  function run() {
+    var v1 = document.getElementById('v');
+    var v2 = document.createElement('video');
+    v2.muted = true;
+    document.body.appendChild(v2);
+    buildMyMpd().then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      runPlayer(v1, '/_vs-dash/manifest.mpd', 'FFMPEG-MPD', function () {
+        runPlayer(v2, url, 'MINE-SEGMENTBASE', function () {
+          post({ route: 'dashtest', v1: { rs: v1.readyState, vw: v1.videoWidth }, v2: { rs: v2.readyState, vw: v2.videoWidth } });
+        });
+      });
+    });
+  }
+  run();
+})();
+</script>
+</body>
+</html>

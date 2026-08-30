@@ -1,0 +1,65 @@
+name: vshell
+description: "vshell — 通用视频网站桌面应用（Flutter），内置 AcFun 数据源（m3u8）"
+publish_to: 'none'
+
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.10.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # 播放：media_kit（libmpv）——m3u8/HLS 原生支持
+  media_kit: ^1.2.0
+  media_kit_video: ^1.2.5
+  media_kit_libs_windows_video: ^1.0.11
+
+  # 网络：dio（连接池/拦截器/重试）
+  dio: ^5.7.0
+
+  # 状态管理
+  provider: ^6.1.2
+
+  # 持久化
+  shared_preferences: ^2.3.3
+
+  # 路径
+  path_provider: ^2.1.5
+  path: ^1.9.0
+
+  # 窗口管理
+  window_manager: ^0.4.3
+
+  # 文件选择（导入本地视频/保存下载）
+  file_selector: ^1.0.3
+  # vendored：宿主窗口改 Flutter 主窗口（修复 IME 候选框位置——插件
+  # message-only 宿主窗口抢前台，webview_windows_plugin.cc 已改）
+  webview_windows:
+    path: vendor/webview_windows
+  ffi: ^2.2.0
+
+  # Android 壳：inappwebview 替代 WebView2（requestInterceptor 映射 app.local → assets，
+  # postMessage 桥与 chrome.webview 同构；仅 Android 运行路径使用）。
+  # vendored：windows 子包已移除（Windows 端用 webview_windows，避免 nuget 依赖）
+  flutter_inappwebview:
+    path: vendor/flutter_inappwebview
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/codicon.ttf
+    - assets/web/
+    - assets/web/fixtures/hls.min.js
+
+  fonts:
+    - family: codicon
+      fonts:
+        - asset: assets/codicon.ttf

@@ -1,0 +1,16 @@
+{
+  "name": "vshell-app",
+  "productName": "vshell",
+  "version": "0.1.0",
+  "description": "vshell — 通用视频网站桌面应用（Electron），内置 B 站数据源",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "python build-renderer.py"
+  },
+  "author": "vshell",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^37.2.0"
+  }
+}

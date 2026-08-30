@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>VShell mp4box 合并管线测试</title>
+</head>
+<body>
+<pre id="log">running…</pre>
+<textarea id="out" style="display:none"></textarea>
+<script src="/vshell/vendor/mp4box.all.min.js"></script>
+<script>
+(function () {
+  var log = document.getElementById('log');
+  var out = document.getElementById('out');
+  function L(s) { log.textContent += '\n' + s; console.log(s); }
+
+  function toB64(buf) {
+    var bytes = new Uint8Array(buf);
+    var s = '';
+    var CH = 0x8000;
+    for (var i = 0; i < bytes.length; i += CH) {
+      s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+    }
+    return btoa(s);
+  }
+
+  async function run() {
+    try {
+      var v = await (await fetch('/_vs-fixtures/video.m4s')).arrayBuffer();
+      var a = await (await fetch('/_vs-fixtures/audio.m4s')).arrayBuffer();
+      L('fetched video=' + v.byteLength + ' audio=' + a.byteLength);
+
+      var file = MP4Box.createFile();
+      var readyCount = 0;
+      file.onError = function (e) { L('onError: ' + e); };
+      file.onReady = function (info) {
+        readyCount++;
+        L('onReady#' + readyCount + ' tracks=' + (info.tracks ? info.tracks.map(function (t) { return t.id + ':' + t.codec; }).join(', ') : 'none') + ' isFragmented=' + info.isFragmented + ' duration=' + info.duration);
+      };
+      file.appendBuffer(v);
+      file.flush();
+      file.appendBuffer(a);
+      file.flush();
+      var merged = file.getBuffer();
+      L('merged bytes=' + merged.byteLength + ' readyCount=' + readyCount);
+      out.value = toB64(merged);
+      document.title = 'DONE ' + merged.byteLength;
+      L('=== DONE ===');
+    } catch (e) {
+      L('FAIL: ' + (e && e.stack || e));
+      document.title = 'FAIL';
+    }
+  }
+  run();
+})();
+</script>
+</body>
+</html>
