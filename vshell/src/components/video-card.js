@@ -41,6 +41,33 @@
       var lv = V.localVideos.find(item.id);
       if (lv && lv.cover) item.cover = lv.cover;
     }
+    // v0.6.1 视频聚合：成员卡折叠成组卡——显示主成员封面+标题，
+    // id 换组 id、href 进组详情（#/video/grp:<id>），右上角加组角标。
+    // 两种来源：①成员卡（item.id 真实 id，按（源,id）反查组）
+    // ②组项快照（待看/收藏/黑名单存组 id，item.id 即 grp:xxx）
+    var grp = null;
+    var origItem = item;   // 组卡时保留原始成员引用（懒扫描/状态用）
+    if (V.aggregations) {
+      if (V.aggregations.isGroupId(item.id)) {
+        grp = V.aggregations.getGroup(item.id);
+      } else if (item.sourceId && item.sourceId !== 'local') {
+        grp = V.aggregations.groupOf(item.sourceId, item.id);
+      }
+    }
+    if (grp) {
+      var _gid = grp.id;
+      item = {
+        id: _gid,
+        title: grp.title || item.title,
+        pic: grp.cover || item.pic,
+        cover: grp.cover || item.cover,
+        duration: item.duration,
+        owner: item.owner,
+        stat: item.stat,
+        sourceId: grp.coverSrc || item.sourceId,
+        _grp: true,
+      };
+    }
     var cover = opts.layout === 'cover';
     var saved = V.saved || {};
     // v0.5.7 多源：收藏/待看状态按（源,id）查（item.sourceId 标注归属）
@@ -62,11 +89,14 @@
     if (srcDisabled) card.classList.add('src-disabled');
 
     // ===== 媒体区（链接：点击整图跳详情；demo 结构 + 进度条）=====
+    // v0.6.1 聚合：组卡 href = #/video/grp:<组id>（进组详情切源页）
+    var cardHref = item._grp
+      ? '#/video/grp:' + encodeURIComponent(item.id.slice(4))
+      : '#/video/' + (item.sourceId && item.sourceId !== 'local'
+          ? item.sourceId + ':' : '') + encodeURIComponent(item.id);
     var media = V.utils.el('a', {
       className: 'vsc-video-media',
-      // v0.5.7 多源：href 带源前缀（跨源同 id 是不同实体；本地视频除外）
-      href: '#/video/' + (item.sourceId && item.sourceId !== 'local'
-        ? item.sourceId + ':' : '') + encodeURIComponent(item.id),
+      href: cardHref,
       'aria-label': item.title,
     });
     var video = V.utils.el('video', {
@@ -218,6 +248,14 @@
     // 显示成右上+中上+左上（第一行一条线），用户指出与 demo 不一致
     var MARK_POS = { 1: [1, 3], 2: [1, 2], 3: [2, 3], 4: [2, 2], 5: [1, 1], 6: [2, 1], 7: [3, 3], 8: [3, 2], 9: [3, 1] };
     var marks = [];
+    // v0.6.1 聚合：组角标（新颜色 is-group-mark，固定占矩阵位置 1=右上角，
+    // 其余状态点顺延——placeMarks 按可见点 1..n 动态分配）
+    if (grp) {
+      marks.push(V.utils.el('span', {
+        className: 'vsc-video-saved-mark is-group-mark',
+        title: '已聚合 ' + grp.members.length + ' 个视频（点击查看全部来源）',
+      }));
+    }
     // 顺序：本地 → 收藏 → 代表作 → 待看（v0.5.6 第十九轮）
     // v0.5.6 第二十轮需求 1：快照（charVideos/fm）可能丢 local 字段——
     // 用 id 前缀 'local:' 兜底识别本地视频（marquee 卡补圆点）
@@ -292,8 +330,10 @@
         bvid: item.bvid || item.id,
         title: item.title || '',
         cover: item.cover || item.pic || '',
-        url: '#/video/' + (item.sourceId && item.sourceId !== 'local'
-          ? item.sourceId + ':' : '') + item.id,
+        url: item._grp
+          ? '#/video/grp:' + encodeURIComponent(item.id.slice(4))
+          : '#/video/' + (item.sourceId && item.sourceId !== 'local'
+              ? item.sourceId + ':' : '') + item.id,
         pubdate: item.pubdate || '',
       };
     }
@@ -364,8 +404,11 @@
           className: 'vsc-video-title',
           // v0.5.7 多源：卡片 href 带源前缀 #/video/<源>:<id>（跨源同 id
           // 是不同实体；本地视频 sourceId='local' 用原 id 含 local: 前缀）
-          href: '#/video/' + (item.sourceId && item.sourceId !== 'local'
-            ? item.sourceId + ':' : '') + encodeURIComponent(item.id),
+          // v0.6.1 聚合：组卡 href = #/video/grp:<组id>
+          href: item._grp
+            ? '#/video/grp:' + encodeURIComponent(item.id.slice(4))
+            : '#/video/' + (item.sourceId && item.sourceId !== 'local'
+                ? item.sourceId + ':' : '') + encodeURIComponent(item.id),
           title: item.title,
         });
     /** 差量更新：重算角色 → 重建标题关键词高亮（不改标题文本/href） */
@@ -484,6 +527,8 @@
        不触发倍速预览（原挂在 card 上） */
     media.addEventListener('mouseenter', function () {
       if (reduce) return;                    // demo：reduced-motion 不自动播放
+      // v0.6.1 聚合：组卡无真实视频 id，禁用帧采样预览
+      if (item._grp) return;
       card.classList.add('is-previewing');
       V.preview.enter(card, item);
     });
@@ -576,6 +621,13 @@
       renderTitle();
       if (!cover) renderMeta();
     };
+
+    // v0.6.1 聚合：后台增量扫描——卡片渲染时对**原始成员**入队算 phash
+    // （组卡/组项快照/已扫过跳过；scanned 会话级去重，串行节流不抢首屏）
+    if (V.aggregations && origItem && origItem.sourceId && origItem.sourceId !== 'local'
+        && !V.aggregations.isGroupId(origItem.id)) {
+      V.aggregations.scheduleScan(origItem);
+    }
 
     return card;
   }

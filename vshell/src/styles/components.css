@@ -824,8 +824,46 @@
 /* v0.5.6 第十二轮需求 2：本地视频圆点（绿）；需求 8：代表作圆点（金） */
 .vsc-video-saved-mark.is-local          { background: var(--vscode-terminal-ansiGreen, #89d185); }
 .vsc-video-saved-mark.is-featured-mark  { background: var(--vscode-editorLightBulb-foreground, #ffcc00); }
+/* v0.6.1 聚合：组角标（紫色——不与蓝/红/绿/金状态点重复） */
+.vsc-video-saved-mark.is-group-mark     { background: var(--vscode-terminal-ansiMagenta, #c586c0); }
 .vsc-video-saved-mark.is-hidden { display: none; }
 .vsc-video-media:hover .vsc-video-saved-marks { opacity: 0; }
+
+/* ===== v0.6.1 聚合：组详情顶部源切换器（成员条） ===== */
+.vshell-group-bar {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 8px 16px; margin-bottom: 4px;
+  border-bottom: 1px solid var(--vscode-sideBar-border, rgba(128, 128, 128, 0.35));
+}
+.vshell-group-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: 260px;
+  padding: 3px 10px;
+  border: 1px solid var(--vscode-sideBar-border, rgba(128, 128, 128, 0.35));
+  border-radius: 12px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  cursor: pointer;
+}
+.vshell-group-chip:hover { background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.15)); }
+.vshell-group-chip.is-active {
+  border-color: var(--vscode-focusBorder, #007fd4);
+  background: var(--vscode-list-activeSelectionBackground, #094771);
+  color: var(--vscode-list-activeSelectionForeground, #ffffff);
+}
+.vshell-group-chip.is-inactive { opacity: 0.45; }
+.vshell-group-chip-src { font-weight: 600; }
+.vshell-group-chip-title {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vshell-group-chip-part {
+  font-size: 10px; padding: 0 5px; border-radius: 8px;
+  background: rgba(128, 128, 128, 0.25);
+}
+.vshell-group-chip-part.is-full {
+  background: var(--vscode-terminal-ansiGreen, #89d185); color: #0b140b;
+}
 
 /* ===== 卡片 tag 图片角标（v0.3.0 用户需求：tag 配图，左上角圆角方框） =====
  * 匹配上的每个 tag 一张图（40x40 圆角方框，v0.3.1 用户要求大一倍）；

@@ -19,9 +19,19 @@
   var MAX_FAV = 500;
 
   function srcOf(item) {
+    // v0.6.1 聚合：组 id（grp:xxx）的收藏/待看存 'grp' 源键（组级一条）
+    if (item && isGroupId(item.id)) return 'grp';
     return (item && item.sourceId) || (V.multisource ? V.multisource.primary() : 'acfun');
   }
   function sk(srcId) { return V.store.scopedKey(KEY, srcId); }
+  /** v0.6.1：组 id → 'grp' 源键（查询用） */
+  function sidOf(id, srcId) {
+    if (isGroupId(id)) return 'grp';
+    return srcId || (V.multisource ? V.multisource.primary() : 'acfun');
+  }
+  function isGroupId(id) {
+    return typeof id === 'string' && id.indexOf('grp:') === 0;
+  }
   /** 复合键（不依赖 V.multisource——本模块加载期 multisource 未就绪） */
   function ckey(srcId, id) { return String(srcId) + ':' + String(id); }
 
@@ -47,6 +57,11 @@
     var out = { watch: [], fav: [] };
     var seenW = {}, seenF = {};
     var ids = V.multisource ? V.multisource.activeSources() : ['acfun'];
+    // v0.6.1 聚合：组级收藏/待看（saved.grp 键）并入并集（有数据才显示）
+    var gd = V.store.get(sk('grp'));
+    if (gd && ((gd.watch && gd.watch.length) || (gd.fav && gd.fav.length))) {
+      ids = ids.concat('grp');
+    }
     ids.forEach(function (id) {
       var d = loadSrc(id);
       d.watch.forEach(function (it) {
@@ -126,11 +141,11 @@
     on: function (fn) { em.on('change', fn); },
 
     isWatch: function (id, srcId) {
-      var sid = srcId || (V.multisource ? V.multisource.primary() : 'acfun');
+      var sid = sidOf(id, srcId);
       return indexOf(loadSrc(sid).watch, id) !== -1;
     },
     isFav: function (id, srcId) {
-      var sid = srcId || (V.multisource ? V.multisource.primary() : 'acfun');
+      var sid = sidOf(id, srcId);
       return indexOf(loadSrc(sid).fav, id) !== -1;
     },
     toggleWatch: function (item) {

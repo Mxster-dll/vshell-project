@@ -705,9 +705,19 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   var MAX_FAV = 500;
 
   function srcOf(item) {
+    // v0.6.1 聚合：组 id（grp:xxx）的收藏/待看存 'grp' 源键（组级一条）
+    if (item && isGroupId(item.id)) return 'grp';
     return (item && item.sourceId) || (V.multisource ? V.multisource.primary() : 'acfun');
   }
   function sk(srcId) { return V.store.scopedKey(KEY, srcId); }
+  /** v0.6.1：组 id → 'grp' 源键（查询用） */
+  function sidOf(id, srcId) {
+    if (isGroupId(id)) return 'grp';
+    return srcId || (V.multisource ? V.multisource.primary() : 'acfun');
+  }
+  function isGroupId(id) {
+    return typeof id === 'string' && id.indexOf('grp:') === 0;
+  }
   /** 复合键（不依赖 V.multisource——本模块加载期 multisource 未就绪） */
   function ckey(srcId, id) { return String(srcId) + ':' + String(id); }
 
@@ -733,6 +743,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var out = { watch: [], fav: [] };
     var seenW = {}, seenF = {};
     var ids = V.multisource ? V.multisource.activeSources() : ['acfun'];
+    // v0.6.1 聚合：组级收藏/待看（saved.grp 键）并入并集（有数据才显示）
+    var gd = V.store.get(sk('grp'));
+    if (gd && ((gd.watch && gd.watch.length) || (gd.fav && gd.fav.length))) {
+      ids = ids.concat('grp');
+    }
     ids.forEach(function (id) {
       var d = loadSrc(id);
       d.watch.forEach(function (it) {
@@ -812,11 +827,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     on: function (fn) { em.on('change', fn); },
 
     isWatch: function (id, srcId) {
-      var sid = srcId || (V.multisource ? V.multisource.primary() : 'acfun');
+      var sid = sidOf(id, srcId);
       return indexOf(loadSrc(sid).watch, id) !== -1;
     },
     isFav: function (id, srcId) {
-      var sid = srcId || (V.multisource ? V.multisource.primary() : 'acfun');
+      var sid = sidOf(id, srcId);
       return indexOf(loadSrc(sid).fav, id) !== -1;
     },
     toggleWatch: function (item) {
@@ -2378,9 +2393,19 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   var listeners = [];
 
   function srcOf(item) {
+    // v0.6.1 聚合：组 id（grp:xxx）的黑名单存 'grp' 源键（组级一条）
+    if (item && isGroupId(item.id)) return 'grp';
     return (item && item.sourceId) || (V.multisource ? V.multisource.primary() : 'acfun');
   }
   function sk(srcId) { return V.store.scopedKey(KEY, srcId); }
+  /** v0.6.1：组 id → 'grp' 源键（查询用） */
+  function sidOf(id, srcId) {
+    if (isGroupId(id)) return 'grp';
+    return srcId || (V.multisource ? V.multisource.primary() : 'acfun');
+  }
+  function isGroupId(id) {
+    return typeof id === 'string' && id.indexOf('grp:') === 0;
+  }
   /** 复合键（不依赖 V.multisource——本模块加载期 multisource 未就绪） */
   function ckey(srcId, id) { return String(srcId) + ':' + String(id); }
 
@@ -2433,6 +2458,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var out = [];
     var seen = {};
     var ids = V.multisource ? V.multisource.activeSources() : ['acfun'];
+    // v0.6.1 聚合：组级黑名单（blacklist.grp 键）并入并集
+    var gd = V.store.get(sk('grp'));
+    if (gd && gd.length) ids = ids.concat('grp');
     ids.forEach(function (id) {
       loadSrc(id).forEach(function (b) {
         if (!b.sourceId) b.sourceId = id;
@@ -2464,7 +2492,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   /** 是否被屏蔽（按源查；srcId 缺省主源） */
   function isBlocked(id, srcId) {
     if (!id) return false;
-    var sid = srcId || (V.multisource ? V.multisource.primary() : 'acfun');
+    var sid = sidOf(id, srcId);
     var l = loadSrc(sid);
     for (var i = 0; i < l.length; i++) if (l[i].id === id) return true;
     return false;
@@ -2502,7 +2530,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
 
   /** 解除（按源）；返回 true = 存在并移除 */
   function remove(id, srcId) {
-    var sid = srcId || (V.multisource ? V.multisource.primary() : 'acfun');
+    var sid = sidOf(id, srcId);
     var l = loadSrc(sid);
     for (var i = 0; i < l.length; i++) {
       if (l[i].id === id) { l.splice(i, 1); persistSrc(sid, l); invalidate(); list = unionList(); notify(); return true; }
@@ -3969,6 +3997,482 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     unionSet: unionSet,
     refreshRegistry: refreshRegistry,
     onChange: onChange,
+  };
+})();
+
+
+/* ===== src/core/aggregations.js ===== */
+
+/* ============================================================
+ * aggregations — 视频聚合（组 = 虚拟条目）
+ * 用户需求（grilling 定稿）：
+ *   1) 判定：封面 phash 高度相似 → 自动并入；自动化只有并入、永不自动拆
+ *   2) 层面：数据层真合并——组 id，成员=(源,id) 跨源集合；收藏/待看/
+ *      黑名单/角色归属存组 id（组级一条）
+ *   3) 卡片：单卡显示主成员封面+标题 + 右上角组角标（新颜色）
+ *   4) 详情：单详情 + 顶部源切换器（未激活源置灰）
+ *   5) 主成员：质量优先（番号>标题长>封面非占位>更新时间>源序）
+ *   6) 播放排序：完整版(part=1)优先（内按时长）→ 默认(0) → 片段(part=2)
+ *      → 时长不可比 → 源注册表顺序
+ *   7) 片段标记：纯手动（part: 0=默认 1=完整版 2=片段）
+ *   8) 自动时机：后台增量（scheduleScan，video-card 渲染时懒扫）+ 启动
+ *      补扫历史缓存（scanCache）；匹配方向：视频 vs 组、视频 vs 视频
+ * 存储：localStorage 'vshell.aggregations'（web 权威 + __VS_STORE_BRIDGE__ 写穿）
+ *   结构：{ groups: { 'grp:xxx': {id,title,cover,coverSrc,repPhash,auto,members,updatedAt} },
+ *           pending: { 'src:id': {h:[h1,h2],t,c,d} } }   // 未入组视频的 phash 索引
+ * 命名空间：VShell.aggregations（依赖 V.md5 / V.store / V.multisource / V.siteAdapters）
+ * ============================================================ */
+(function () {
+  'use strict';
+  var V = window.VShell = window.VShell || {};
+  var KEY = 'aggregations';
+  var GID_PREFIX = 'grp:';
+  var PHASH_DIST = 10;          // 64 位汉明距离阈值（~15%）
+  var listeners = [];
+  var map = null;               // 惰性加载
+  var scanned = {};             // 'src:id' → 已入队/已算（会话级去重）
+  var scanQueue = [];
+  var scanRunning = false;
+
+  function isGroupId(id) {
+    return typeof id === 'string' && id.indexOf(GID_PREFIX) === 0;
+  }
+
+  function load() {
+    if (map) return map;
+    map = V.store.get(KEY, {});
+    if (!map.groups) map.groups = {};
+    if (!map.pending) map.pending = {};
+    return map;
+  }
+  function persist() {
+    V.store.set(KEY, map);
+    try {
+      if (window.__VS_STORE_BRIDGE__ && window.__VS_STORE_BRIDGE__.push) {
+        window.__VS_STORE_BRIDGE__.push(KEY, JSON.stringify(map));
+      }
+    } catch (e) { /* noop */ }
+  }
+  function notify() {
+    if (window.__VS_SETTINGS_OPEN__) return;
+    for (var i = 0; i < listeners.length; i++) {
+      try { listeners[i](); } catch (e) { /* noop */ }
+    }
+  }
+  function onChange(fn) { listeners.push(fn); }
+
+  function gidOf(members) {
+    var list = members.map(function (m) { return m.src + ':' + m.id; }).sort();
+    var h = '';
+    try { h = V.md5(list.join(',')); } catch (e) { /* noop */ }
+    return GID_PREFIX + (h || String(Math.random()).slice(2)).slice(0, 10);
+  }
+
+  function groupOf(srcId, id) {
+    load();
+    var gs = map.groups;
+    for (var g in gs) {
+      var gd = gs[g];
+      for (var i = 0; i < gd.members.length; i++) {
+        if (gd.members[i].src === srcId && String(gd.members[i].id) === String(id)) return gd;
+      }
+    }
+    return null;
+  }
+  function getGroup(gid) { load(); return map.groups[gid] || null; }
+
+  // ---- 主成员质量比较（决策 5：番号>标题长>封面非占位>更新时间>源序）----
+  var CODE_RE = /[A-Za-z]{2,6}\s*-?\s*\d{2,6}/;
+  function qualityScore(meta) {
+    var s = 0;
+    var title = meta && meta.title ? String(meta.title) : '';
+    if (CODE_RE.test(title)) s += 10000;                              // 番号
+    s += Math.min(1000, title.length);                                // 标题长
+    if (meta && meta.cover) s += 500;                                 // 封面非占位
+    if (meta && meta.pubdate) s += 100;                               // 更新时间
+    return s;
+  }
+  function srcOrder(srcId) {
+    try {
+      var cand = V.multisource && V.multisource.allCandidates
+        ? V.multisource.allCandidates() : [];
+      var i = cand.indexOf(srcId);
+      return i < 0 ? 999 : i;
+    } catch (e) { return 999; }
+  }
+
+  // ---- 创建 / 合并 ----
+  /** members=[{src,id,part?,title?,cover?}]
+   *  opts: { title, cover, coverSrc, auto, id,
+   *          memberMeta: { 'src:id': {title,cover,pubdate,src} },  // 质量比较元数据
+   *          memberPhash: { 'src:id': [h1,h2] } }                  // best 的 phash 作为 repPhash */
+  function createGroup(members, opts) {
+    load();
+    opts = opts || {};
+    var seen = {};
+    var ms = [];
+    members.forEach(function (m) {
+      var k = m.src + ':' + m.id;
+      if (seen[k]) return;
+      seen[k] = 1;
+      ms.push({ src: m.src, id: String(m.id), part: m.part || 0 });
+    });
+    if (!ms.length) return null;
+    var gid = opts.id || gidOf(ms);
+    // 质量优先选主成员（有 memberMeta 时）
+    var best = ms[0], bestKey = best.src + ':' + best.id;
+    var bestMeta = opts.memberMeta ? (opts.memberMeta[bestKey] || {}) : {};
+    if (opts.memberMeta) {
+      var bs = null, bsKey = '', bsScore = -1;
+      ms.forEach(function (m) {
+        var mm = opts.memberMeta[m.src + ':' + m.id];
+        if (!mm) return;
+        var sc = qualityScore(mm);
+        if (sc > bsScore || (sc === bsScore && (bs ? srcOrder(m.src) < srcOrder(bs.src) : true))) {
+          bs = m; bsKey = m.src + ':' + m.id; bsScore = sc;
+        }
+      });
+      if (bs) { best = bs; bestKey = bsKey; bestMeta = opts.memberMeta[bsKey] || {}; }
+    }
+    var repPh = (opts.memberPhash && opts.memberPhash[bestKey]) || opts.repPhash || 0;
+    var g = {
+      id: gid,
+      title: opts.title || bestMeta.title || (best.title || best.id),
+      cover: opts.cover || bestMeta.cover || (best.cover || ''),
+      coverSrc: opts.coverSrc || best.src,
+      repPhash: repPh,
+      auto: !!opts.auto,
+      members: ms,
+      updatedAt: Date.now(),
+    };
+    map.groups[gid] = g;
+    persist(); notify();
+    return gid;
+  }
+
+  function addToGroup(gid, member) {
+    load();
+    var g = map.groups[gid];
+    if (!g) return false;
+    for (var i = 0; i < g.members.length; i++) {
+      if (g.members[i].src === member.src && String(g.members[i].id) === String(member.id)) return false;
+    }
+    g.members.push({ src: member.src, id: String(member.id), part: member.part || 0 });
+    g.updatedAt = Date.now();   // 主成员不改（决策 5）
+    delete map.pending[member.src + ':' + member.id];
+    persist(); notify();
+    return true;
+  }
+
+  function removeMember(gid, srcId, id) {
+    load();
+    var g = map.groups[gid];
+    if (!g) return false;
+    g.members = g.members.filter(function (m) {
+      return !(m.src === srcId && String(m.id) === String(id));
+    });
+    g.updatedAt = Date.now();
+    if (!g.members.length) delete map.groups[gid];
+    persist(); notify();
+    return true;
+  }
+
+  function mergeGroups(gidA, gidB, opts) {
+    load();
+    var a = map.groups[gidA], b = map.groups[gidB];
+    if (!a || !b || gidA === gidB) return false;
+    b.members.forEach(function (m) {
+      var k = m.src + ':' + m.id;
+      var dup = a.members.some(function (x) { return x.src === m.src && String(x.id) === String(m.id); });
+      if (!dup) a.members.push(m);
+      delete map.pending[k];
+    });
+    if (opts) {
+      if (opts.title) a.title = opts.title;
+      if (opts.cover) { a.cover = opts.cover; a.coverSrc = opts.coverSrc || a.coverSrc; }
+    }
+    a.updatedAt = Date.now();
+    delete map.groups[gidB];
+    persist(); notify();
+    return true;
+  }
+
+  function setTitleCover(gid, title, cover, coverSrc) {
+    load();
+    var g = map.groups[gid];
+    if (!g) return false;
+    if (title !== undefined) g.title = title;
+    if (cover !== undefined) { g.cover = cover; g.coverSrc = coverSrc || g.coverSrc; }
+    g.updatedAt = Date.now();
+    persist(); notify();
+    return true;
+  }
+
+  function setPart(gid, srcId, id, part) {
+    load();
+    var g = map.groups[gid];
+    if (!g) return false;
+    for (var i = 0; i < g.members.length; i++) {
+      var m = g.members[i];
+      if (m.src === srcId && String(m.id) === String(id)) {
+        m.part = part;
+        g.updatedAt = Date.now();
+        persist(); notify();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 删除整组（二期「解除聚合」/管理面板用） */
+  function removeGroup(gid) {
+    load();
+    if (!map.groups[gid]) return false;
+    delete map.groups[gid];
+    persist(); notify();
+    return true;
+  }
+
+  // ---- 播放排序（决策 6/7：完整版→默认→片段，内按时长，时长不可比→源序）----
+  function orderMembers(gid) {
+    var g = getGroup(gid);
+    if (!g) return [];
+    var list = g.members.slice();
+    list.sort(function (a, b) {
+      var pa = a.part === 1 ? 2 : (a.part === 2 ? 0 : 1);
+      var pb = b.part === 1 ? 2 : (b.part === 2 ? 0 : 1);
+      if (pa !== pb) return pb - pa;
+      var da = a.duration || 0, db = b.duration || 0;
+      if (da && db && da !== db) return db - da;
+      if (!!da !== !!db) return da ? -1 : 1;
+      return srcOrder(a.src) - srcOrder(b.src);
+    });
+    return list;
+  }
+
+  // ---- phash（64 位感知哈希；cors fetch → blob URL，避开画布污染）----
+  // WebView2 实测：no-cors opaque response 的 blob() 为空（size 0）——
+  // cors 优先（图床通常放行），失败再试 no-cors（部分图床仍可读）
+  function loadBlobUrl(url) {
+    try {
+      return fetch(url, { mode: 'cors' }).then(function (r) {
+        if (!r.ok) return null;
+        return r.blob().then(function (b) {
+          if (!b || !b.size) return null;
+          return URL.createObjectURL(b);
+        });
+      }).catch(function () {
+        try {
+          return fetch(url, { mode: 'no-cors' }).then(function (r2) {
+            return r2.blob().then(function (b2) {
+              if (!b2 || !b2.size) return null;
+              return URL.createObjectURL(b2);
+            });
+          }).catch(function () { return null; });
+        } catch (e) { return Promise.resolve(null); }
+      });
+    } catch (e) { return Promise.resolve(null); }
+  }
+  function phashOf(url) {
+    return loadBlobUrl(url).then(function (objUrl) {
+      if (!objUrl) return null;
+      return new Promise(function (resolve) {
+        var img = new Image();
+        img.onload = function () {
+          try {
+            var c = document.createElement('canvas');
+            c.width = 16; c.height = 16;
+            var ctx = c.getContext('2d');
+            ctx.drawImage(img, 0, 0, 16, 16);
+            var d = ctx.getImageData(0, 0, 16, 16).data;
+            var grays = [];
+            for (var i = 0; i < 256; i++) grays.push(0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]);
+            var mean = 0;
+            for (var j = 0; j < 256; j++) mean += grays[j];
+            mean /= 256;
+            var h1 = 0, h2 = 0;
+            for (var k = 0; k < 256; k++) {
+              if (grays[k] >= mean) {
+                if (k < 128) h1 |= (1 << (k % 32));
+                else h2 |= (1 << ((k - 128) % 32));
+              }
+            }
+            try { URL.revokeObjectURL(img.src); } catch (e) { /* noop */ }
+            resolve([h1 >>> 0, h2 >>> 0]);
+          } catch (e) { resolve(null); }
+        };
+        img.onerror = function () { resolve(null); };
+        img.src = objUrl;
+      });
+    });
+  }
+  function hamming(a, b) {
+    if (!a || !b) return 999;
+    var x = a[0] ^ b[0], y = a[1] ^ b[1];
+    var n = 0;
+    while (x) { n += x & 1; x >>>= 1; }
+    while (y) { n += y & 1; y >>>= 1; }
+    return n;
+  }
+
+  /** 解析可绘制封面 URL：17c 加密图先解密（picDecryptor）；相对路径拼 baseUrl */
+  function resolvePicUrl(srcId, item, baseUrl) {
+    var pic = item.pic || item.cover || '';
+    if (!pic) return Promise.resolve(null);
+    try {
+      if (V.siteAdapters && V.siteAdapters.picDecryptorFor) {
+        var dec = V.siteAdapters.picDecryptorFor(srcId);
+        if (dec) {
+          return dec(pic).then(function (u) { return u || null; }).catch(function () { return null; });
+        }
+      }
+    } catch (e) { /* noop */ }
+    if (/^https?:\/\//.test(pic) || /^blob:/.test(pic) || /^data:/.test(pic)) return Promise.resolve(pic);
+    if (baseUrl && /^\//.test(pic)) return Promise.resolve(baseUrl.replace(/\/+$/, '') + pic);
+    return Promise.resolve(pic);
+  }
+
+  // ---- 自动扫描（决策 8：后台增量 + 启动补扫；只并不拆）----
+  /** 激活源集合（未激活源——含隐私源——数据不在视野内，禁止自动聚合） */
+  function activeSrcSet() {
+    try {
+      var a = V.multisource ? V.multisource.activeSources() : ['acfun'];
+      var s = {};
+      a.forEach(function (x) { s[x] = 1; });
+      s['local'] = 1;
+      return s;
+    } catch (e) { return { acfun: 1, local: 1 }; }
+  }
+  /** v0.6.1 启动清理：auto 组移除未激活源成员（隐私源语义：不加载不显示），
+   *  空组删除、主成员落回激活源、pending 未激活源索引清除 */
+  function cleanInactive() {
+    load();
+    var active = activeSrcSet();
+    var changed = false;
+    Object.keys(map.groups).forEach(function (g) {
+      var gd = map.groups[g];
+      if (!gd.auto) return;
+      var before = gd.members.length;
+      gd.members = gd.members.filter(function (m) { return active[m.src]; });
+      if (!gd.members.length) { delete map.groups[g]; changed = true; return; }
+      if (gd.members.length !== before) changed = true;
+      if (!active[gd.coverSrc]) {
+        gd.coverSrc = gd.members[0].src;
+        gd.cover = '';   // 主成员换源，封面暂缺（组卡用占位+标题）
+      }
+    });
+    Object.keys(map.pending).forEach(function (k) {
+      var ci = k.indexOf(':');
+      var sid = ci < 0 ? k : k.slice(0, ci);
+      if (!active[sid]) { delete map.pending[k]; changed = true; }
+    });
+    if (changed) persist();
+    return changed;
+  }
+  function scheduleScan(item, baseUrl) {
+    if (!item || !item.id || !item.sourceId) return;
+    if (!activeSrcSet()[item.sourceId]) return;   // 未激活源不自动聚合
+    var k = item.sourceId + ':' + item.id;
+    if (scanned[k]) return;
+    scanned[k] = 1;
+    scanQueue.push({ item: item, srcId: item.sourceId, baseUrl: baseUrl });
+    pumpScan();
+  }
+  function pumpScan() {
+    if (scanRunning || !scanQueue.length) return;
+    scanRunning = true;
+    var job = scanQueue.shift();
+    setTimeout(function () {
+      doScan(job).then(function () { scanRunning = false; pumpScan(); });
+    }, 250);   // 节流，避免首屏抢 CPU
+  }
+  function doScan(job) {
+    var item = job.item, srcId = job.srcId;
+    if (!srcId) return Promise.resolve();
+    if (groupOf(srcId, item.id)) return Promise.resolve();
+    return resolvePicUrl(srcId, item, job.baseUrl).then(function (u) {
+      if (!u) return;
+      return phashOf(u).then(function (h) {
+        if (!h) return;
+        var gs = map.groups;
+        for (var g in gs) {                                    // 视频 vs 组内成员
+          var gd = gs[g];
+          if (gd.repPhash && hamming(h, gd.repPhash) <= PHASH_DIST) {
+            addToGroup(g, { src: srcId, id: item.id });
+            return;
+          }
+        }
+        var pend = map.pending;
+        for (var k in pend) {                                  // 视频 vs 视频 → 自动建组
+          var p = pend[k];
+          if (p && p.h && hamming(h, p.h) <= PHASH_DIST) {
+            var ci = k.indexOf(':');
+            var m2 = { src: k.slice(0, ci), id: k.slice(ci + 1) };
+            var meta = {};
+            meta[srcId + ':' + item.id] = { title: item.title, cover: item.pic || item.cover, pubdate: item.pubdate, src: srcId };
+            meta[k] = { title: p.t, cover: p.c, pubdate: p.d, src: m2.src };
+            var mph = {};
+            mph[srcId + ':' + item.id] = h;
+            mph[k] = p.h;
+            createGroup(
+              [{ src: srcId, id: item.id, title: item.title, cover: item.pic || item.cover },
+               { src: m2.src, id: m2.id, title: p.t, cover: p.c }],
+              { auto: true, memberMeta: meta, memberPhash: mph });
+            delete map.pending[k];
+            return;
+          }
+        }
+        map.pending[srcId + ':' + item.id] = { h: h, t: item.title, c: item.pic || item.cover, d: item.pubdate };
+        persist();
+      });
+    });
+  }
+
+  /** 启动补扫历史缓存（vshell.wall.* 分片 items；只扫**激活源**——
+   *  未激活/隐私源数据不在视野内，禁止自动聚合） */
+  function scanCache() {
+    var active = activeSrcSet();
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var lk = localStorage.key(i);
+        if (lk && lk.indexOf('vshell.wall.') === 0) {
+          try {
+            var data = JSON.parse(localStorage.getItem(lk));
+            var base = data && data.baseUrl ? data.baseUrl : '';
+            var srcId = lk.slice('vshell.wall.'.length);
+            srcId = srcId.substring(srcId.lastIndexOf('.') + 1);
+            if (!active[srcId]) continue;
+            if (data && data.items && data.items.length) {
+              data.items.forEach(function (it) {
+                if (it && it.id) scheduleScan({ id: it.id, sourceId: srcId, title: it.title, pic: it.pic || it.cover, pubdate: it.pubdate }, base);
+              });
+            }
+          } catch (e) { /* noop */ }
+        }
+      }
+    } catch (e) { /* noop */ }
+  }
+
+  V.aggregations = {
+    isGroupId: isGroupId,
+    groupOf: groupOf,
+    getGroup: getGroup,
+    getGroups: function () { load(); return map.groups; },
+    createGroup: createGroup,
+    addToGroup: addToGroup,
+    removeMember: removeMember,
+    mergeGroups: mergeGroups,
+    setTitleCover: setTitleCover,
+    setPart: setPart,
+    removeGroup: removeGroup,
+    orderMembers: orderMembers,
+    scheduleScan: scheduleScan,
+    scanCache: scanCache,
+    cleanInactive: cleanInactive,
+    phashOf: phashOf,
+    onChange: onChange,
+    notify: notify,
+    count: function () { load(); return Object.keys(map.groups).length; },
   };
 })();
 
@@ -6185,6 +6689,33 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       var lv = V.localVideos.find(item.id);
       if (lv && lv.cover) item.cover = lv.cover;
     }
+    // v0.6.1 视频聚合：成员卡折叠成组卡——显示主成员封面+标题，
+    // id 换组 id、href 进组详情（#/video/grp:<id>），右上角加组角标。
+    // 两种来源：①成员卡（item.id 真实 id，按（源,id）反查组）
+    // ②组项快照（待看/收藏/黑名单存组 id，item.id 即 grp:xxx）
+    var grp = null;
+    var origItem = item;   // 组卡时保留原始成员引用（懒扫描/状态用）
+    if (V.aggregations) {
+      if (V.aggregations.isGroupId(item.id)) {
+        grp = V.aggregations.getGroup(item.id);
+      } else if (item.sourceId && item.sourceId !== 'local') {
+        grp = V.aggregations.groupOf(item.sourceId, item.id);
+      }
+    }
+    if (grp) {
+      var _gid = grp.id;
+      item = {
+        id: _gid,
+        title: grp.title || item.title,
+        pic: grp.cover || item.pic,
+        cover: grp.cover || item.cover,
+        duration: item.duration,
+        owner: item.owner,
+        stat: item.stat,
+        sourceId: grp.coverSrc || item.sourceId,
+        _grp: true,
+      };
+    }
     var cover = opts.layout === 'cover';
     var saved = V.saved || {};
     // v0.5.7 多源：收藏/待看状态按（源,id）查（item.sourceId 标注归属）
@@ -6206,11 +6737,14 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (srcDisabled) card.classList.add('src-disabled');
 
     // ===== 媒体区（链接：点击整图跳详情；demo 结构 + 进度条）=====
+    // v0.6.1 聚合：组卡 href = #/video/grp:<组id>（进组详情切源页）
+    var cardHref = item._grp
+      ? '#/video/grp:' + encodeURIComponent(item.id.slice(4))
+      : '#/video/' + (item.sourceId && item.sourceId !== 'local'
+          ? item.sourceId + ':' : '') + encodeURIComponent(item.id);
     var media = V.utils.el('a', {
       className: 'vsc-video-media',
-      // v0.5.7 多源：href 带源前缀（跨源同 id 是不同实体；本地视频除外）
-      href: '#/video/' + (item.sourceId && item.sourceId !== 'local'
-        ? item.sourceId + ':' : '') + encodeURIComponent(item.id),
+      href: cardHref,
       'aria-label': item.title,
     });
     var video = V.utils.el('video', {
@@ -6362,6 +6896,14 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     // 显示成右上+中上+左上（第一行一条线），用户指出与 demo 不一致
     var MARK_POS = { 1: [1, 3], 2: [1, 2], 3: [2, 3], 4: [2, 2], 5: [1, 1], 6: [2, 1], 7: [3, 3], 8: [3, 2], 9: [3, 1] };
     var marks = [];
+    // v0.6.1 聚合：组角标（新颜色 is-group-mark，固定占矩阵位置 1=右上角，
+    // 其余状态点顺延——placeMarks 按可见点 1..n 动态分配）
+    if (grp) {
+      marks.push(V.utils.el('span', {
+        className: 'vsc-video-saved-mark is-group-mark',
+        title: '已聚合 ' + grp.members.length + ' 个视频（点击查看全部来源）',
+      }));
+    }
     // 顺序：本地 → 收藏 → 代表作 → 待看（v0.5.6 第十九轮）
     // v0.5.6 第二十轮需求 1：快照（charVideos/fm）可能丢 local 字段——
     // 用 id 前缀 'local:' 兜底识别本地视频（marquee 卡补圆点）
@@ -6436,8 +6978,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         bvid: item.bvid || item.id,
         title: item.title || '',
         cover: item.cover || item.pic || '',
-        url: '#/video/' + (item.sourceId && item.sourceId !== 'local'
-          ? item.sourceId + ':' : '') + item.id,
+        url: item._grp
+          ? '#/video/grp:' + encodeURIComponent(item.id.slice(4))
+          : '#/video/' + (item.sourceId && item.sourceId !== 'local'
+              ? item.sourceId + ':' : '') + item.id,
         pubdate: item.pubdate || '',
       };
     }
@@ -6508,8 +7052,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           className: 'vsc-video-title',
           // v0.5.7 多源：卡片 href 带源前缀 #/video/<源>:<id>（跨源同 id
           // 是不同实体；本地视频 sourceId='local' 用原 id 含 local: 前缀）
-          href: '#/video/' + (item.sourceId && item.sourceId !== 'local'
-            ? item.sourceId + ':' : '') + encodeURIComponent(item.id),
+          // v0.6.1 聚合：组卡 href = #/video/grp:<组id>
+          href: item._grp
+            ? '#/video/grp:' + encodeURIComponent(item.id.slice(4))
+            : '#/video/' + (item.sourceId && item.sourceId !== 'local'
+                ? item.sourceId + ':' : '') + encodeURIComponent(item.id),
           title: item.title,
         });
     /** 差量更新：重算角色 → 重建标题关键词高亮（不改标题文本/href） */
@@ -6628,6 +7175,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
        不触发倍速预览（原挂在 card 上） */
     media.addEventListener('mouseenter', function () {
       if (reduce) return;                    // demo：reduced-motion 不自动播放
+      // v0.6.1 聚合：组卡无真实视频 id，禁用帧采样预览
+      if (item._grp) return;
       card.classList.add('is-previewing');
       V.preview.enter(card, item);
     });
@@ -6720,6 +7269,13 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       renderTitle();
       if (!cover) renderMeta();
     };
+
+    // v0.6.1 聚合：后台增量扫描——卡片渲染时对**原始成员**入队算 phash
+    // （组卡/组项快照/已扫过跳过；scanned 会话级去重，串行节流不抢首屏）
+    if (V.aggregations && origItem && origItem.sourceId && origItem.sourceId !== 'local'
+        && !V.aggregations.isGroupId(origItem.id)) {
+      V.aggregations.scheduleScan(origItem);
+    }
 
     return card;
   }
@@ -12649,6 +13205,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   function mount(outlet, params) {
     // v0.5.7 多源：URL 带源（#/video/<源>:<id>）→ 该源适配器；
     // 旧格式（无源）→ 主源；本地视频（src='local' 或 id 含 local: 前缀）
+    // v0.6.1 聚合：URL #/video/grp:<组id> → 组详情（顶部源切换器）
     var src = params.src || null;
     var id = params.id;
     var isLocal = src === 'local' || /^local:/.test(id || '');
@@ -12656,17 +13213,27 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       // 旧格式本地 id（local:xxx）拆出裸 id（新格式 src 已含源）
       id = String(id).replace(/^local:/, '');
     }
-    var adapter = isLocal ? null
-      : (src ? V.siteAdapters.adapterFor(src) : V.siteAdapters.current());
-    // v0.5.7 多源：详情归属源（收藏/待看/黑名单写入用）
-    var detailSrc = isLocal ? 'local'
-      : (src || (V.multisource ? V.multisource.primary() : 'acfun'));
+    // v0.6.1 组详情：当前成员状态由 loadMember 赋值（成员切换时变化）
+    var adapter = null;
+    var detailSrc = 'acfun';
     var done = false;
     var player = null;
     var playInfo = null;
+    // v0.6.1：组路由解析 + 切换清理
+    var isGroup = src === 'grp' || /^grp:/.test(id || '');
+    var gid = isGroup ? (src === 'grp' ? 'grp:' + id : id) : null;
+    var curCleanup = null;
+    // v0.5.6 分镜/角色监听（mount 级声明——render 内 offChars 曾遮蔽导致
+    // destroy 引用 ReferenceError，提升后成员切换/卸载统一清理）
+    var offChars = null, offGapChange = null;
+    var shotsDetach = null, shotsStopScan = null, scanWin = null;
 
     var page = V.utils.el('div', { className: 'vshell-page vshell-page-detail' });
     outlet.appendChild(page);
+    // v0.6.1：内容区（骨架/详情/空态）——成员切换时整体重建；
+    // 组条/返回按钮挂 page 顶层不动
+    var contentBox = V.utils.el('div', { className: 'vshell-detail-content' });
+    page.appendChild(contentBox);
 
     var currentTitle = '';
     var currentPic = '';
@@ -12678,7 +13245,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '60%' } }),
       V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '35%' } }),
     ]);
-    page.appendChild(skeleton);
+    contentBox.appendChild(skeleton);
 
     // ---- 加载数据 ----
     // v0.5.7：源未启用（角色页/收藏页全源快照可见但源未激活，**含内置源**）→
@@ -12696,81 +13263,175 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       } catch (e) { /* noop */ }
       return null;
     }
-    // 源未启用：直接空态，不发起网络请求（避免网络失败提示掩盖未启用提示）
-    var disMsg = srcDisabledMsg();
-    if (disMsg) {
-      skeleton.remove();
-      page.appendChild(V.wall.empty(disMsg, 'codicon-error'));
-      return {
-        destroy: function () { page.remove(); },
-      };
-    }
-    if (!adapter && !isLocal) {
-      skeleton.remove();
-      page.appendChild(V.wall.empty(srcDisabledMsg() || '数据源不可用', 'codicon-error'));
-      return {
-        destroy: function () { page.remove(); },
-      };
-    }
-    // v0.5.6 第十二轮需求 2：本地视频数据源——不查网站接口，
-    // 由 localVideos 快照构造 detail + 直链播放源（objectURL）
-    if (isLocal && V.localVideos) {
-      var lv = V.localVideos.find('local:' + id);
-      if (!lv) {
-        skeleton.remove();
-        page.appendChild(V.wall.empty('本地视频不存在或已删除', 'codicon-error'));
-      } else {
-        var ldetail = {
-          id: 'local:' + id, bvid: 'local:' + id, cid: 0,
-          title: lv.title || '', pic: lv.cover || '',
-          stat: { view: lv.stat ? lv.stat.view : 0, danmaku: 0 },
-          pubdate: lv.pubdate || 0, duration: lv.duration || 0,
-          tname: '本地视频', local: true,
-        };
-        skeleton.remove();
-        render(ldetail, []);
-        V.localVideos.playInfo(lv).then(function (pi) {
+
+    /** v0.6.1 加载单个成员详情（组详情切换/普通详情共用）：
+     *  切换时清理上一次渲染（curCleanup），内容区整体重建 */
+    function loadMember(mSrc, mId) {
+      src = mSrc; id = mId;
+      isLocal = mSrc === 'local';
+      adapter = isLocal ? null
+        : (mSrc ? V.siteAdapters.adapterFor(mSrc) : V.siteAdapters.current());
+      detailSrc = isLocal ? 'local'
+        : (mSrc || (V.multisource ? V.multisource.primary() : 'acfun'));
+      if (curCleanup) { try { curCleanup(); } catch (e) { /* noop */ } curCleanup = null; }
+      contentBox.innerHTML = '';
+      var sk2 = V.utils.el('div', { className: 'vshell-detail-skeleton' }, [
+        V.utils.el('div', { className: 'vshell-skeleton-block vshell-skeleton-player' }),
+        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '60%' } }),
+        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '35%' } }),
+      ]);
+      contentBox.appendChild(sk2);
+      // 源未启用：直接空态，不发起网络请求（避免网络失败提示掩盖未启用提示）
+      var disMsg2 = srcDisabledMsg();
+      if (disMsg2) {
+        sk2.remove();
+        contentBox.appendChild(V.wall.empty(disMsg2, 'codicon-error'));
+        return;
+      }
+      if (!adapter && !isLocal) {
+        sk2.remove();
+        contentBox.appendChild(V.wall.empty(srcDisabledMsg() || '数据源不可用', 'codicon-error'));
+        return;
+      }
+      // v0.5.6 第十二轮需求 2：本地视频数据源——不查网站接口，
+      // 由 localVideos 快照构造 detail + 直链播放源（objectURL）
+      if (isLocal && V.localVideos) {
+        var lv = V.localVideos.find('local:' + mId);
+        if (!lv) {
+          sk2.remove();
+          contentBox.appendChild(V.wall.empty('本地视频不存在或已删除', 'codicon-error'));
+        } else {
+          var ldetail = {
+            id: 'local:' + mId, bvid: 'local:' + mId, cid: 0,
+            title: lv.title || '', pic: lv.cover || '',
+            stat: { view: lv.stat ? lv.stat.view : 0, danmaku: 0 },
+            pubdate: lv.pubdate || 0, duration: lv.duration || 0,
+            tname: '本地视频', local: true,
+          };
+          sk2.remove();
+          render(ldetail, []);
+          V.localVideos.playInfo(lv).then(function (pi) {
+            if (done) return;
+            playInfo = pi;
+            setupPlayer(pi);
+          }).catch(function (e) {
+            if (done) return;
+            V.toast.error('本地视频播放失败：' + e.message);
+          });
+        }
+        return;
+      }
+      Promise.all([
+        adapter.getVideoDetail(mId),
+        adapter.getRelated(mId).catch(function () { return []; }),
+      ]).then(function (res) {
+        if (done) return;
+        var detail = res[0];
+        var related = res[1];
+        // v0.5.7：详情数据不存在（幽灵卡 id 已失效 / adapter 返回 null）→
+        // 空态而非崩溃（修复 "Cannot set properties of null (setting 'sourceId')"）；
+        // 源未启用时优先提示去设置启用（角色页快照卡常见）
+        if (!detail || typeof detail !== 'object') {
+          sk2.remove();
+          contentBox.appendChild(V.wall.empty(srcDisabledMsg() || '详情加载失败：视频不存在或已失效', 'codicon-error'));
+          return;
+        }
+        sk2.remove();
+        render(detail, related);
+        // 播放源（可失败：未登录/风控 → toast）
+        adapter.getPlayInfo(mId, detail.cid).then(function (pi) {
           if (done) return;
           playInfo = pi;
           setupPlayer(pi);
         }).catch(function (e) {
           if (done) return;
-          V.toast.error('本地视频播放失败：' + e.message);
+          V.toast.error('播放源获取失败：' + e.message);
         });
-      }
-      return;
-    }
-    Promise.all([
-      adapter.getVideoDetail(id),
-      adapter.getRelated(id).catch(function () { return []; }),
-    ]).then(function (res) {
-      if (done) return;
-      var detail = res[0];
-      var related = res[1];
-      // v0.5.7：详情数据不存在（幽灵卡 id 已失效 / adapter 返回 null）→
-      // 空态而非崩溃（修复 "Cannot set properties of null (setting 'sourceId')"）；
-      // 源未启用时优先提示去设置启用（角色页快照卡常见）
-      if (!detail || typeof detail !== 'object') {
-        skeleton.remove();
-        page.appendChild(V.wall.empty(srcDisabledMsg() || '详情加载失败：视频不存在或已失效', 'codicon-error'));
-        return;
-      }
-      skeleton.remove();
-      render(detail, related);
-      // 播放源（可失败：未登录/风控 → toast）
-      adapter.getPlayInfo(id, detail.cid).then(function (pi) {
-        if (done) return;
-        playInfo = pi;
-        setupPlayer(pi);
       }).catch(function (e) {
         if (done) return;
-        V.toast.error('播放源获取失败：' + e.message);
+        sk2.remove();
+        contentBox.appendChild(V.wall.empty('详情加载失败：' + e.message, 'codicon-error'));
       });
-    }).catch(function (e) {
-      if (done) return;
-      skeleton.remove();
-      page.appendChild(V.wall.empty('详情加载失败：' + e.message, 'codicon-error'));
-    });
+    }
+
+    /** v0.6.1 组详情顶部源切换器：成员 chip（源名 + 标题 + 片段/完整版徽标 +
+     *  未激活源置灰）；点击 → loadMember。标题加载成功后 updateChip 回填 */
+    function renderGroupBar(grpObj) {
+      var bar = V.utils.el('div', { className: 'vshell-group-bar' });
+      var ordered = V.aggregations.orderMembers(grpObj.id);
+      var chips = [];
+      ordered.forEach(function (m) {
+        var nm = m.src;
+        try {
+          var ad2 = V.siteAdapters.adapterFor(m.src);
+          if (ad2 && ad2.meta && ad2.meta.name) nm = ad2.meta.name;
+        } catch (e) { /* noop */ }
+        var inactive = m.src !== 'local'
+          && (!V.multisource || V.multisource.activeSources().indexOf(m.src) < 0);
+        var titleEl = V.utils.el('span', { className: 'vshell-group-chip-title' },
+          m.src + ':' + m.id);
+        var chip = V.utils.el('button', {
+          className: 'vshell-group-chip' + (inactive ? ' is-inactive' : ''),
+          type: 'button',
+          title: (inactive ? '数据源未启用：' : '') + m.src + ':' + m.id,
+        }, [
+          V.utils.el('span', { className: 'vshell-group-chip-src' }, nm),
+          titleEl,
+          m.part === 1
+            ? V.utils.el('span', { className: 'vshell-group-chip-part is-full' }, '完整版')
+            : (m.part === 2
+                ? V.utils.el('span', { className: 'vshell-group-chip-part' }, '片段')
+                : null),
+        ]);
+        chip.addEventListener('click', function () {
+          loadMember(m.src, m.id);
+        });
+        chips.push({ chip: chip, titleEl: titleEl, m: m });
+        bar.appendChild(chip);
+      });
+      page.appendChild(bar);
+      V.__groupChips = chips;
+    }
+    /** 回填当前成员 chip 标题 + 激活态（render 后调用） */
+    function updateChip(mSrc, mId, title) {
+      if (!V.__groupChips) return;
+      V.__groupChips.forEach(function (c) {
+        if (c.m.src === mSrc && String(c.m.id) === String(mId)) {
+          c.chip.classList.add('is-active');
+          c.titleEl.textContent = title || (mSrc + ':' + mId);
+        } else {
+          c.chip.classList.remove('is-active');
+        }
+      });
+    }
+
+    // v0.6.1 组详情入口：成员条 + 默认选第一个可用成员；否则普通详情
+    if (isGroup) {
+      var grpObj = V.aggregations ? V.aggregations.getGroup(gid) : null;
+      if (!grpObj || !grpObj.members || !grpObj.members.length) {
+        contentBox.appendChild(V.wall.empty('聚合组不存在或已删除', 'codicon-error'));
+        return {
+          destroy: function () { page.remove(); },
+        };
+      }
+      renderGroupBar(grpObj);
+      var ordered = V.aggregations.orderMembers(gid);
+      var picked = null;
+      for (var oi = 0; oi < ordered.length; oi++) {
+        var ok2 = ordered[oi].src === 'local'
+          || (V.multisource && V.multisource.activeSources().indexOf(ordered[oi].src) >= 0);
+        if (ok2) { picked = ordered[oi]; break; }
+      }
+      if (!picked) {
+        contentBox.appendChild(V.wall.empty('组内没有可播放的成员（请先在设置中启用对应数据源）', 'codicon-error'));
+        return {
+          destroy: function () { page.remove(); },
+        };
+      }
+      loadMember(picked.src, picked.id);
+    } else {
+      loadMember(src, id);
+    }
 
     // ---- 渲染 ----
     function render(detail, related) {
@@ -12778,12 +13439,22 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       // 空态而非崩溃（修复 "Cannot set properties of null (setting 'sourceId')"）
       if (!detail || typeof detail !== 'object') {
         skeleton.remove();
-        page.appendChild(V.wall.empty('详情加载失败：视频不存在或已失效', 'codicon-error'));
+        contentBox.appendChild(V.wall.empty('详情加载失败：视频不存在或已失效', 'codicon-error'));
         return;
       }
-      detail.sourceId = detailSrc;   // v0.5.7 多源：标注归属（收藏/角色按源）
+      // v0.6.1 聚合：组详情——收藏/待看/黑名单按**组 id**存（组级一条），
+      // 标题/封面用组主成员；播放/分镜/相关仍用当前成员（闭包 id 变量）
+      if (isGroup) {
+        detail.id = gid;
+        detail.title = (grpObj && grpObj.title) || detail.title;
+        detail.pic = (grpObj && grpObj.cover) || detail.pic;
+        detail.sourceId = 'grp';
+      } else {
+        detail.sourceId = detailSrc;   // v0.5.7 多源：标注归属（收藏/角色按源）
+      }
       currentTitle = detail.title || '';
       currentPic = detail.pic || '';
+      updateChip(src, id, detail.title);   // v0.6.1 组详情：回填成员 chip 标题
 
       // 两栏骨架：左主 + 右相关（学 bilibili；窄屏 responsive.css 落回单列）
       var layout = V.utils.el('div', { className: 'vshell-detail-layout' });
@@ -12791,7 +13462,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       var side = V.utils.el('div', { className: 'vshell-detail-side' });
       layout.appendChild(main);
       layout.appendChild(side);
-      page.appendChild(layout);
+      contentBox.appendChild(layout);
 
       // 1. 标题（顶部）+ 复制按钮（点击后按钮自身有小动画：图标变对勾 + 脉冲）
       // v0.5.6 第十轮（用户需求 1）：返回按钮——置 __VS_KEEP_SCROLL__
@@ -12854,7 +13525,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       // 用户需求：点击添加角色后页面立即生效，无需刷新
       // v0.5.6：已有角色头像点击 → 角色主页（用户需求）；更改走独立按钮
       var upRow = V.utils.el('div', { className: 'vshell-detail-up' });
-      var offChars = null;
+      offChars = null;   // v0.6.1：复用 mount 级声明（曾为 render 局部遮蔽 → destroy ReferenceError）
       /** 视频快照（角色主页「手动添加」列表数据；v0.5.6） */
       function detailMeta() {
         return {
@@ -13070,6 +13741,17 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         });
         side.appendChild(list);
       }
+      // v0.6.1：当前渲染的清理函数（成员切换/页面卸载时统一销毁，
+      // 避免 player/监听/分镜任务泄漏到下一次渲染）
+      curCleanup = function () {
+        if (offChars) { try { offChars(); } catch (e) { /* noop */ } offChars = null; }
+        if (offGapChange) { try { offGapChange(); } catch (e) { /* noop */ } offGapChange = null; }
+        if (shotsDetach) { try { shotsDetach(); } catch (e) { /* noop */ } shotsDetach = null; }
+        if (shotsStopScan) { try { shotsStopScan(); } catch (e) { /* noop */ } shotsStopScan = null; }
+        hideScanProgress();
+        if (player) { try { player.destroy(); } catch (e) { /* noop */ } player = null; }
+        layout.remove();
+      };
     }
 
     function actionBtn(icon, label, kind) {
@@ -13154,7 +13836,6 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     // 立即持久化到缓存，节点单调增长，杜绝「两套节点来回切」。
     // 不重复识别：已识别（缓存非空或 scanned 标记）不再快扫；
     // 未识别：快扫全量 → 完成后才挂边播分析（串行，不并行重复识别）
-    var shotsDetach = null, shotsStopScan = null, scanWin = null, offGapChange = null;
     function setupShots(pi) {
       var bar = player.root.querySelector('.vshell-player-bar');
       function render() {
@@ -13241,12 +13922,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     return {
       destroy: function () {
         done = true;
-        if (offChars) { try { offChars(); } catch (e) {} offChars = null; }
-        if (offGapChange) { try { offGapChange(); } catch (e) {} offGapChange = null; }
-        if (shotsDetach) { try { shotsDetach(); } catch (e) {} shotsDetach = null; }
-        if (shotsStopScan) { try { shotsStopScan(); } catch (e) {} shotsStopScan = null; }
-        hideScanProgress();
-        if (player) { player.destroy(); player = null; }
+        // v0.6.1：统一走 curCleanup（含成员切换残留的 player/监听/分镜任务）
+        if (curCleanup) { try { curCleanup(); } catch (e) { /* noop */ } curCleanup = null; }
         page.remove();
       },
     };
@@ -16279,6 +16956,14 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
 
     PAGE_NAMES.forEach(function (name) { V.router.on(name, render); });
     V.router.start();
+    // v0.6.1 聚合：启动先清未激活源（隐私源）的自动聚合数据，再补扫
+    // 历史缓存（phash 自动并入，后台串行节流，延迟 2s 避开首屏渲染）
+    if (V.aggregations && V.aggregations.cleanInactive) {
+      setTimeout(function () {
+        V.aggregations.cleanInactive();
+        if (V.aggregations.scanCache) V.aggregations.scanCache();
+      }, 2000);
+    }
     // 切换遮罩收尾：首帧渲染提交后隐藏（60ms 让浏览器提交帧）
     if (switching && V.switchOverlay) {
       setTimeout(function () { V.switchOverlay.hide(); }, 60);
@@ -18706,8 +19391,46 @@ html.vshell::-webkit-scrollbar {
 /* v0.5.6 第十二轮需求 2：本地视频圆点（绿）；需求 8：代表作圆点（金） */
 .vsc-video-saved-mark.is-local          { background: var(--vscode-terminal-ansiGreen, #89d185); }
 .vsc-video-saved-mark.is-featured-mark  { background: var(--vscode-editorLightBulb-foreground, #ffcc00); }
+/* v0.6.1 聚合：组角标（紫色——不与蓝/红/绿/金状态点重复） */
+.vsc-video-saved-mark.is-group-mark     { background: var(--vscode-terminal-ansiMagenta, #c586c0); }
 .vsc-video-saved-mark.is-hidden { display: none; }
 .vsc-video-media:hover .vsc-video-saved-marks { opacity: 0; }
+
+/* ===== v0.6.1 聚合：组详情顶部源切换器（成员条） ===== */
+.vshell-group-bar {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 8px 16px; margin-bottom: 4px;
+  border-bottom: 1px solid var(--vscode-sideBar-border, rgba(128, 128, 128, 0.35));
+}
+.vshell-group-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: 260px;
+  padding: 3px 10px;
+  border: 1px solid var(--vscode-sideBar-border, rgba(128, 128, 128, 0.35));
+  border-radius: 12px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  cursor: pointer;
+}
+.vshell-group-chip:hover { background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.15)); }
+.vshell-group-chip.is-active {
+  border-color: var(--vscode-focusBorder, #007fd4);
+  background: var(--vscode-list-activeSelectionBackground, #094771);
+  color: var(--vscode-list-activeSelectionForeground, #ffffff);
+}
+.vshell-group-chip.is-inactive { opacity: 0.45; }
+.vshell-group-chip-src { font-weight: 600; }
+.vshell-group-chip-title {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vshell-group-chip-part {
+  font-size: 10px; padding: 0 5px; border-radius: 8px;
+  background: rgba(128, 128, 128, 0.25);
+}
+.vshell-group-chip-part.is-full {
+  background: var(--vscode-terminal-ansiGreen, #89d185); color: #0b140b;
+}
 
 /* ===== 卡片 tag 图片角标（v0.3.0 用户需求：tag 配图，左上角圆角方框） =====
  * 匹配上的每个 tag 一张图（40x40 圆角方框，v0.3.1 用户要求大一倍）；

@@ -473,6 +473,14 @@
 
     PAGE_NAMES.forEach(function (name) { V.router.on(name, render); });
     V.router.start();
+    // v0.6.1 聚合：启动先清未激活源（隐私源）的自动聚合数据，再补扫
+    // 历史缓存（phash 自动并入，后台串行节流，延迟 2s 避开首屏渲染）
+    if (V.aggregations && V.aggregations.cleanInactive) {
+      setTimeout(function () {
+        V.aggregations.cleanInactive();
+        if (V.aggregations.scanCache) V.aggregations.scanCache();
+      }, 2000);
+    }
     // 切换遮罩收尾：首帧渲染提交后隐藏（60ms 让浏览器提交帧）
     if (switching && V.switchOverlay) {
       setTimeout(function () { V.switchOverlay.hide(); }, 60);

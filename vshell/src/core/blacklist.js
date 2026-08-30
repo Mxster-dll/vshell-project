@@ -21,9 +21,19 @@
   var listeners = [];
 
   function srcOf(item) {
+    // v0.6.1 聚合：组 id（grp:xxx）的黑名单存 'grp' 源键（组级一条）
+    if (item && isGroupId(item.id)) return 'grp';
     return (item && item.sourceId) || (V.multisource ? V.multisource.primary() : 'acfun');
   }
   function sk(srcId) { return V.store.scopedKey(KEY, srcId); }
+  /** v0.6.1：组 id → 'grp' 源键（查询用） */
+  function sidOf(id, srcId) {
+    if (isGroupId(id)) return 'grp';
+    return srcId || (V.multisource ? V.multisource.primary() : 'acfun');
+  }
+  function isGroupId(id) {
+    return typeof id === 'string' && id.indexOf('grp:') === 0;
+  }
   /** 复合键（不依赖 V.multisource——本模块加载期 multisource 未就绪） */
   function ckey(srcId, id) { return String(srcId) + ':' + String(id); }
 
@@ -76,6 +86,9 @@
     var out = [];
     var seen = {};
     var ids = V.multisource ? V.multisource.activeSources() : ['acfun'];
+    // v0.6.1 聚合：组级黑名单（blacklist.grp 键）并入并集
+    var gd = V.store.get(sk('grp'));
+    if (gd && gd.length) ids = ids.concat('grp');
     ids.forEach(function (id) {
       loadSrc(id).forEach(function (b) {
         if (!b.sourceId) b.sourceId = id;
@@ -107,7 +120,7 @@
   /** 是否被屏蔽（按源查；srcId 缺省主源） */
   function isBlocked(id, srcId) {
     if (!id) return false;
-    var sid = srcId || (V.multisource ? V.multisource.primary() : 'acfun');
+    var sid = sidOf(id, srcId);
     var l = loadSrc(sid);
     for (var i = 0; i < l.length; i++) if (l[i].id === id) return true;
     return false;
@@ -145,7 +158,7 @@
 
   /** 解除（按源）；返回 true = 存在并移除 */
   function remove(id, srcId) {
-    var sid = srcId || (V.multisource ? V.multisource.primary() : 'acfun');
+    var sid = sidOf(id, srcId);
     var l = loadSrc(sid);
     for (var i = 0; i < l.length; i++) {
       if (l[i].id === id) { l.splice(i, 1); persistSrc(sid, l); invalidate(); list = unionList(); notify(); return true; }

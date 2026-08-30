@@ -21,6 +21,7 @@
   function mount(outlet, params) {
     // v0.5.7 多源：URL 带源（#/video/<源>:<id>）→ 该源适配器；
     // 旧格式（无源）→ 主源；本地视频（src='local' 或 id 含 local: 前缀）
+    // v0.6.1 聚合：URL #/video/grp:<组id> → 组详情（顶部源切换器）
     var src = params.src || null;
     var id = params.id;
     var isLocal = src === 'local' || /^local:/.test(id || '');
@@ -28,17 +29,27 @@
       // 旧格式本地 id（local:xxx）拆出裸 id（新格式 src 已含源）
       id = String(id).replace(/^local:/, '');
     }
-    var adapter = isLocal ? null
-      : (src ? V.siteAdapters.adapterFor(src) : V.siteAdapters.current());
-    // v0.5.7 多源：详情归属源（收藏/待看/黑名单写入用）
-    var detailSrc = isLocal ? 'local'
-      : (src || (V.multisource ? V.multisource.primary() : 'acfun'));
+    // v0.6.1 组详情：当前成员状态由 loadMember 赋值（成员切换时变化）
+    var adapter = null;
+    var detailSrc = 'acfun';
     var done = false;
     var player = null;
     var playInfo = null;
+    // v0.6.1：组路由解析 + 切换清理
+    var isGroup = src === 'grp' || /^grp:/.test(id || '');
+    var gid = isGroup ? (src === 'grp' ? 'grp:' + id : id) : null;
+    var curCleanup = null;
+    // v0.5.6 分镜/角色监听（mount 级声明——render 内 offChars 曾遮蔽导致
+    // destroy 引用 ReferenceError，提升后成员切换/卸载统一清理）
+    var offChars = null, offGapChange = null;
+    var shotsDetach = null, shotsStopScan = null, scanWin = null;
 
     var page = V.utils.el('div', { className: 'vshell-page vshell-page-detail' });
     outlet.appendChild(page);
+    // v0.6.1：内容区（骨架/详情/空态）——成员切换时整体重建；
+    // 组条/返回按钮挂 page 顶层不动
+    var contentBox = V.utils.el('div', { className: 'vshell-detail-content' });
+    page.appendChild(contentBox);
 
     var currentTitle = '';
     var currentPic = '';
@@ -50,7 +61,7 @@
       V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '60%' } }),
       V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '35%' } }),
     ]);
-    page.appendChild(skeleton);
+    contentBox.appendChild(skeleton);
 
     // ---- 加载数据 ----
     // v0.5.7：源未启用（角色页/收藏页全源快照可见但源未激活，**含内置源**）→
@@ -68,81 +79,175 @@
       } catch (e) { /* noop */ }
       return null;
     }
-    // 源未启用：直接空态，不发起网络请求（避免网络失败提示掩盖未启用提示）
-    var disMsg = srcDisabledMsg();
-    if (disMsg) {
-      skeleton.remove();
-      page.appendChild(V.wall.empty(disMsg, 'codicon-error'));
-      return {
-        destroy: function () { page.remove(); },
-      };
-    }
-    if (!adapter && !isLocal) {
-      skeleton.remove();
-      page.appendChild(V.wall.empty(srcDisabledMsg() || '数据源不可用', 'codicon-error'));
-      return {
-        destroy: function () { page.remove(); },
-      };
-    }
-    // v0.5.6 第十二轮需求 2：本地视频数据源——不查网站接口，
-    // 由 localVideos 快照构造 detail + 直链播放源（objectURL）
-    if (isLocal && V.localVideos) {
-      var lv = V.localVideos.find('local:' + id);
-      if (!lv) {
-        skeleton.remove();
-        page.appendChild(V.wall.empty('本地视频不存在或已删除', 'codicon-error'));
-      } else {
-        var ldetail = {
-          id: 'local:' + id, bvid: 'local:' + id, cid: 0,
-          title: lv.title || '', pic: lv.cover || '',
-          stat: { view: lv.stat ? lv.stat.view : 0, danmaku: 0 },
-          pubdate: lv.pubdate || 0, duration: lv.duration || 0,
-          tname: '本地视频', local: true,
-        };
-        skeleton.remove();
-        render(ldetail, []);
-        V.localVideos.playInfo(lv).then(function (pi) {
+
+    /** v0.6.1 加载单个成员详情（组详情切换/普通详情共用）：
+     *  切换时清理上一次渲染（curCleanup），内容区整体重建 */
+    function loadMember(mSrc, mId) {
+      src = mSrc; id = mId;
+      isLocal = mSrc === 'local';
+      adapter = isLocal ? null
+        : (mSrc ? V.siteAdapters.adapterFor(mSrc) : V.siteAdapters.current());
+      detailSrc = isLocal ? 'local'
+        : (mSrc || (V.multisource ? V.multisource.primary() : 'acfun'));
+      if (curCleanup) { try { curCleanup(); } catch (e) { /* noop */ } curCleanup = null; }
+      contentBox.innerHTML = '';
+      var sk2 = V.utils.el('div', { className: 'vshell-detail-skeleton' }, [
+        V.utils.el('div', { className: 'vshell-skeleton-block vshell-skeleton-player' }),
+        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '60%' } }),
+        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '35%' } }),
+      ]);
+      contentBox.appendChild(sk2);
+      // 源未启用：直接空态，不发起网络请求（避免网络失败提示掩盖未启用提示）
+      var disMsg2 = srcDisabledMsg();
+      if (disMsg2) {
+        sk2.remove();
+        contentBox.appendChild(V.wall.empty(disMsg2, 'codicon-error'));
+        return;
+      }
+      if (!adapter && !isLocal) {
+        sk2.remove();
+        contentBox.appendChild(V.wall.empty(srcDisabledMsg() || '数据源不可用', 'codicon-error'));
+        return;
+      }
+      // v0.5.6 第十二轮需求 2：本地视频数据源——不查网站接口，
+      // 由 localVideos 快照构造 detail + 直链播放源（objectURL）
+      if (isLocal && V.localVideos) {
+        var lv = V.localVideos.find('local:' + mId);
+        if (!lv) {
+          sk2.remove();
+          contentBox.appendChild(V.wall.empty('本地视频不存在或已删除', 'codicon-error'));
+        } else {
+          var ldetail = {
+            id: 'local:' + mId, bvid: 'local:' + mId, cid: 0,
+            title: lv.title || '', pic: lv.cover || '',
+            stat: { view: lv.stat ? lv.stat.view : 0, danmaku: 0 },
+            pubdate: lv.pubdate || 0, duration: lv.duration || 0,
+            tname: '本地视频', local: true,
+          };
+          sk2.remove();
+          render(ldetail, []);
+          V.localVideos.playInfo(lv).then(function (pi) {
+            if (done) return;
+            playInfo = pi;
+            setupPlayer(pi);
+          }).catch(function (e) {
+            if (done) return;
+            V.toast.error('本地视频播放失败：' + e.message);
+          });
+        }
+        return;
+      }
+      Promise.all([
+        adapter.getVideoDetail(mId),
+        adapter.getRelated(mId).catch(function () { return []; }),
+      ]).then(function (res) {
+        if (done) return;
+        var detail = res[0];
+        var related = res[1];
+        // v0.5.7：详情数据不存在（幽灵卡 id 已失效 / adapter 返回 null）→
+        // 空态而非崩溃（修复 "Cannot set properties of null (setting 'sourceId')"）；
+        // 源未启用时优先提示去设置启用（角色页快照卡常见）
+        if (!detail || typeof detail !== 'object') {
+          sk2.remove();
+          contentBox.appendChild(V.wall.empty(srcDisabledMsg() || '详情加载失败：视频不存在或已失效', 'codicon-error'));
+          return;
+        }
+        sk2.remove();
+        render(detail, related);
+        // 播放源（可失败：未登录/风控 → toast）
+        adapter.getPlayInfo(mId, detail.cid).then(function (pi) {
           if (done) return;
           playInfo = pi;
           setupPlayer(pi);
         }).catch(function (e) {
           if (done) return;
-          V.toast.error('本地视频播放失败：' + e.message);
+          V.toast.error('播放源获取失败：' + e.message);
         });
-      }
-      return;
-    }
-    Promise.all([
-      adapter.getVideoDetail(id),
-      adapter.getRelated(id).catch(function () { return []; }),
-    ]).then(function (res) {
-      if (done) return;
-      var detail = res[0];
-      var related = res[1];
-      // v0.5.7：详情数据不存在（幽灵卡 id 已失效 / adapter 返回 null）→
-      // 空态而非崩溃（修复 "Cannot set properties of null (setting 'sourceId')"）；
-      // 源未启用时优先提示去设置启用（角色页快照卡常见）
-      if (!detail || typeof detail !== 'object') {
-        skeleton.remove();
-        page.appendChild(V.wall.empty(srcDisabledMsg() || '详情加载失败：视频不存在或已失效', 'codicon-error'));
-        return;
-      }
-      skeleton.remove();
-      render(detail, related);
-      // 播放源（可失败：未登录/风控 → toast）
-      adapter.getPlayInfo(id, detail.cid).then(function (pi) {
-        if (done) return;
-        playInfo = pi;
-        setupPlayer(pi);
       }).catch(function (e) {
         if (done) return;
-        V.toast.error('播放源获取失败：' + e.message);
+        sk2.remove();
+        contentBox.appendChild(V.wall.empty('详情加载失败：' + e.message, 'codicon-error'));
       });
-    }).catch(function (e) {
-      if (done) return;
-      skeleton.remove();
-      page.appendChild(V.wall.empty('详情加载失败：' + e.message, 'codicon-error'));
-    });
+    }
+
+    /** v0.6.1 组详情顶部源切换器：成员 chip（源名 + 标题 + 片段/完整版徽标 +
+     *  未激活源置灰）；点击 → loadMember。标题加载成功后 updateChip 回填 */
+    function renderGroupBar(grpObj) {
+      var bar = V.utils.el('div', { className: 'vshell-group-bar' });
+      var ordered = V.aggregations.orderMembers(grpObj.id);
+      var chips = [];
+      ordered.forEach(function (m) {
+        var nm = m.src;
+        try {
+          var ad2 = V.siteAdapters.adapterFor(m.src);
+          if (ad2 && ad2.meta && ad2.meta.name) nm = ad2.meta.name;
+        } catch (e) { /* noop */ }
+        var inactive = m.src !== 'local'
+          && (!V.multisource || V.multisource.activeSources().indexOf(m.src) < 0);
+        var titleEl = V.utils.el('span', { className: 'vshell-group-chip-title' },
+          m.src + ':' + m.id);
+        var chip = V.utils.el('button', {
+          className: 'vshell-group-chip' + (inactive ? ' is-inactive' : ''),
+          type: 'button',
+          title: (inactive ? '数据源未启用：' : '') + m.src + ':' + m.id,
+        }, [
+          V.utils.el('span', { className: 'vshell-group-chip-src' }, nm),
+          titleEl,
+          m.part === 1
+            ? V.utils.el('span', { className: 'vshell-group-chip-part is-full' }, '完整版')
+            : (m.part === 2
+                ? V.utils.el('span', { className: 'vshell-group-chip-part' }, '片段')
+                : null),
+        ]);
+        chip.addEventListener('click', function () {
+          loadMember(m.src, m.id);
+        });
+        chips.push({ chip: chip, titleEl: titleEl, m: m });
+        bar.appendChild(chip);
+      });
+      page.appendChild(bar);
+      V.__groupChips = chips;
+    }
+    /** 回填当前成员 chip 标题 + 激活态（render 后调用） */
+    function updateChip(mSrc, mId, title) {
+      if (!V.__groupChips) return;
+      V.__groupChips.forEach(function (c) {
+        if (c.m.src === mSrc && String(c.m.id) === String(mId)) {
+          c.chip.classList.add('is-active');
+          c.titleEl.textContent = title || (mSrc + ':' + mId);
+        } else {
+          c.chip.classList.remove('is-active');
+        }
+      });
+    }
+
+    // v0.6.1 组详情入口：成员条 + 默认选第一个可用成员；否则普通详情
+    if (isGroup) {
+      var grpObj = V.aggregations ? V.aggregations.getGroup(gid) : null;
+      if (!grpObj || !grpObj.members || !grpObj.members.length) {
+        contentBox.appendChild(V.wall.empty('聚合组不存在或已删除', 'codicon-error'));
+        return {
+          destroy: function () { page.remove(); },
+        };
+      }
+      renderGroupBar(grpObj);
+      var ordered = V.aggregations.orderMembers(gid);
+      var picked = null;
+      for (var oi = 0; oi < ordered.length; oi++) {
+        var ok2 = ordered[oi].src === 'local'
+          || (V.multisource && V.multisource.activeSources().indexOf(ordered[oi].src) >= 0);
+        if (ok2) { picked = ordered[oi]; break; }
+      }
+      if (!picked) {
+        contentBox.appendChild(V.wall.empty('组内没有可播放的成员（请先在设置中启用对应数据源）', 'codicon-error'));
+        return {
+          destroy: function () { page.remove(); },
+        };
+      }
+      loadMember(picked.src, picked.id);
+    } else {
+      loadMember(src, id);
+    }
 
     // ---- 渲染 ----
     function render(detail, related) {
@@ -150,12 +255,22 @@
       // 空态而非崩溃（修复 "Cannot set properties of null (setting 'sourceId')"）
       if (!detail || typeof detail !== 'object') {
         skeleton.remove();
-        page.appendChild(V.wall.empty('详情加载失败：视频不存在或已失效', 'codicon-error'));
+        contentBox.appendChild(V.wall.empty('详情加载失败：视频不存在或已失效', 'codicon-error'));
         return;
       }
-      detail.sourceId = detailSrc;   // v0.5.7 多源：标注归属（收藏/角色按源）
+      // v0.6.1 聚合：组详情——收藏/待看/黑名单按**组 id**存（组级一条），
+      // 标题/封面用组主成员；播放/分镜/相关仍用当前成员（闭包 id 变量）
+      if (isGroup) {
+        detail.id = gid;
+        detail.title = (grpObj && grpObj.title) || detail.title;
+        detail.pic = (grpObj && grpObj.cover) || detail.pic;
+        detail.sourceId = 'grp';
+      } else {
+        detail.sourceId = detailSrc;   // v0.5.7 多源：标注归属（收藏/角色按源）
+      }
       currentTitle = detail.title || '';
       currentPic = detail.pic || '';
+      updateChip(src, id, detail.title);   // v0.6.1 组详情：回填成员 chip 标题
 
       // 两栏骨架：左主 + 右相关（学 bilibili；窄屏 responsive.css 落回单列）
       var layout = V.utils.el('div', { className: 'vshell-detail-layout' });
@@ -163,7 +278,7 @@
       var side = V.utils.el('div', { className: 'vshell-detail-side' });
       layout.appendChild(main);
       layout.appendChild(side);
-      page.appendChild(layout);
+      contentBox.appendChild(layout);
 
       // 1. 标题（顶部）+ 复制按钮（点击后按钮自身有小动画：图标变对勾 + 脉冲）
       // v0.5.6 第十轮（用户需求 1）：返回按钮——置 __VS_KEEP_SCROLL__
@@ -226,7 +341,7 @@
       // 用户需求：点击添加角色后页面立即生效，无需刷新
       // v0.5.6：已有角色头像点击 → 角色主页（用户需求）；更改走独立按钮
       var upRow = V.utils.el('div', { className: 'vshell-detail-up' });
-      var offChars = null;
+      offChars = null;   // v0.6.1：复用 mount 级声明（曾为 render 局部遮蔽 → destroy ReferenceError）
       /** 视频快照（角色主页「手动添加」列表数据；v0.5.6） */
       function detailMeta() {
         return {
@@ -442,6 +557,17 @@
         });
         side.appendChild(list);
       }
+      // v0.6.1：当前渲染的清理函数（成员切换/页面卸载时统一销毁，
+      // 避免 player/监听/分镜任务泄漏到下一次渲染）
+      curCleanup = function () {
+        if (offChars) { try { offChars(); } catch (e) { /* noop */ } offChars = null; }
+        if (offGapChange) { try { offGapChange(); } catch (e) { /* noop */ } offGapChange = null; }
+        if (shotsDetach) { try { shotsDetach(); } catch (e) { /* noop */ } shotsDetach = null; }
+        if (shotsStopScan) { try { shotsStopScan(); } catch (e) { /* noop */ } shotsStopScan = null; }
+        hideScanProgress();
+        if (player) { try { player.destroy(); } catch (e) { /* noop */ } player = null; }
+        layout.remove();
+      };
     }
 
     function actionBtn(icon, label, kind) {
@@ -526,7 +652,6 @@
     // 立即持久化到缓存，节点单调增长，杜绝「两套节点来回切」。
     // 不重复识别：已识别（缓存非空或 scanned 标记）不再快扫；
     // 未识别：快扫全量 → 完成后才挂边播分析（串行，不并行重复识别）
-    var shotsDetach = null, shotsStopScan = null, scanWin = null, offGapChange = null;
     function setupShots(pi) {
       var bar = player.root.querySelector('.vshell-player-bar');
       function render() {
@@ -613,12 +738,8 @@
     return {
       destroy: function () {
         done = true;
-        if (offChars) { try { offChars(); } catch (e) {} offChars = null; }
-        if (offGapChange) { try { offGapChange(); } catch (e) {} offGapChange = null; }
-        if (shotsDetach) { try { shotsDetach(); } catch (e) {} shotsDetach = null; }
-        if (shotsStopScan) { try { shotsStopScan(); } catch (e) {} shotsStopScan = null; }
-        hideScanProgress();
-        if (player) { player.destroy(); player = null; }
+        // v0.6.1：统一走 curCleanup（含成员切换残留的 player/监听/分镜任务）
+        if (curCleanup) { try { curCleanup(); } catch (e) { /* noop */ } curCleanup = null; }
         page.remove();
       },
     };

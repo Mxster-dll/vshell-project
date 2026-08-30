@@ -41,6 +41,7 @@ JS_FILES = [
     "core/net.js",           # v0.5.6 插件数据源：V.net.fetch 双路径（原生 fetch → Flutter 桥代理）
     "core/data-source.js",   # v0.5.6 用户需求：设置面板「数据源」项（v0.5.10 独立化：无内置源）
     "core/multisource.js",   # v0.5.7 用户需求：多数据源核心（激活集/隐私排除/预取 k/并集读写）
+    "core/aggregations.js",  # v0.6.1 用户需求：视频聚合（组=虚拟条目，phash 自动并入/主成员/播放排序）
     "core/switchoverlay.js", # v0.5.6 用户需求：数据源切换加载遮罩（切换标记+全屏 spinner）
     "adapters/site-adapter.js",
     # v0.5.10 独立化：bilibili 不再内置——已抽为独立插件文件
