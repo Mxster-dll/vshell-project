@@ -86,6 +86,8 @@
     video.muted = true;
     // v0.6.0 加密封面懒解密：源注册了解密器（pic 是加密 URL，blob 不可持久化）
     // → poster 先空，异步解密后回填。否则缓存加载的 blob URL 重启失效 → 封面黑。
+    // v0.5.10：解密失败（缓存 URL 的 auth_key 过期/域名失效 → 403）→ 先尝试
+    // 用详情接口刷新 pic（新 auth_key），仍失败 → 渐变占位（不显示黑封面）。
     if (item.pic && item.sourceId && V.siteAdapters && V.siteAdapters.picDecryptorFor) {
       var _dec = V.siteAdapters.picDecryptorFor(item.sourceId);
       if (_dec) {
@@ -94,7 +96,29 @@
         video.poster = '';
         _dec(_raw).then(function (u) {
           if (u) video.poster = u;
-        }).catch(function () { /* 解密失败留空（占位/黑，不崩） */ });
+          else refreshCover();
+        }).catch(refreshCover);
+        function refreshCover() {
+          var ad;
+          try { ad = V.siteAdapters.adapterFor(item.sourceId); } catch (e) { ad = null; }
+          if (!ad || typeof ad.getVideoDetail !== 'function') { showCoverPlaceholder(); return; }
+          ad.getVideoDetail(item.id).then(function (d) {
+            if (d && d.pic && d.pic !== _raw) {
+              video.poster = d.pic;   // 17c 详情 pic 为解密后 blob
+              if (d.pic.indexOf('blob:') === 0) return;
+            }
+            showCoverPlaceholder();
+          }).catch(showCoverPlaceholder);
+        }
+        function showCoverPlaceholder() {
+          if (card.classList.contains('is-local-nocover')) return;
+          card.classList.add('is-local-nocover');
+          if (!placeholder) {
+            placeholder = V.utils.el('span', { className: 'vsc-video-placeholder' },
+              V.utils.el('span', { className: 'codicon codicon-file-media' }));
+            media.appendChild(placeholder);
+          }
+        }
       }
     }
     // v0.5.6 第二十三轮：**无封面占位**——本地视频无任何封面图（截帧未

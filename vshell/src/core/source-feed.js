@@ -124,6 +124,10 @@
       if (c && typeof c === 'object') {
         if (typeof c.baseUrl === 'string' && c.baseUrl) baseUrl = c.baseUrl;
         var items = Array.isArray(c.items) ? c.items : [];
+        // v0.5.10：缓存加载同样应用 opts.filter（黑名单/排除词）——缓存是
+        // 历史拉取结果，可能早于黑名单/排除词变更；不过滤会让被剔除的视频
+        // 从缓存复活。仅过滤内存 queue，history 保留（persist 不变，改回条件即可恢复）。
+        if (opts.filter) items = opts.filter(items);
         // v0.6.0 自愈：旧版加密封面缓存（pic 为 blob: 会话级 URL，重启失效）
         // 是**毒缓存**——逐条清空 pic 后这些 item 仍在 seenMap（净新增=0），
         // 增量拉取永不刷新其 pic → 封面恒黑。发现任意 blob: pic 即整片作废，

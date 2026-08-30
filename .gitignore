@@ -10,6 +10,7 @@ build/
 windows/flutter/ephemeral/
 *.apk
 *.aab
+output/
 
 # ===== 探针/调试残留（开发截图、日志、临时脚本）=====
 _*.png
@@ -24,6 +25,9 @@ _*.html
 _*.css
 *.log
 mem_mon*.log
+
+# ===== 构建依赖（vscode-modern-ui skill 资源副本，单一来源在 vsc-ui/skill）=====
+skill/
 
 # ===== 开发残留 =====
 vshell/output

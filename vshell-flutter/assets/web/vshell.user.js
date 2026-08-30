@@ -6230,6 +6230,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     video.muted = true;
     // v0.6.0 加密封面懒解密：源注册了解密器（pic 是加密 URL，blob 不可持久化）
     // → poster 先空，异步解密后回填。否则缓存加载的 blob URL 重启失效 → 封面黑。
+    // v0.5.10：解密失败（缓存 URL 的 auth_key 过期/域名失效 → 403）→ 先尝试
+    // 用详情接口刷新 pic（新 auth_key），仍失败 → 渐变占位（不显示黑封面）。
     if (item.pic && item.sourceId && V.siteAdapters && V.siteAdapters.picDecryptorFor) {
       var _dec = V.siteAdapters.picDecryptorFor(item.sourceId);
       if (_dec) {
@@ -6238,7 +6240,29 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         video.poster = '';
         _dec(_raw).then(function (u) {
           if (u) video.poster = u;
-        }).catch(function () { /* 解密失败留空（占位/黑，不崩） */ });
+          else refreshCover();
+        }).catch(refreshCover);
+        function refreshCover() {
+          var ad;
+          try { ad = V.siteAdapters.adapterFor(item.sourceId); } catch (e) { ad = null; }
+          if (!ad || typeof ad.getVideoDetail !== 'function') { showCoverPlaceholder(); return; }
+          ad.getVideoDetail(item.id).then(function (d) {
+            if (d && d.pic && d.pic !== _raw) {
+              video.poster = d.pic;   // 17c 详情 pic 为解密后 blob
+              if (d.pic.indexOf('blob:') === 0) return;
+            }
+            showCoverPlaceholder();
+          }).catch(showCoverPlaceholder);
+        }
+        function showCoverPlaceholder() {
+          if (card.classList.contains('is-local-nocover')) return;
+          card.classList.add('is-local-nocover');
+          if (!placeholder) {
+            placeholder = V.utils.el('span', { className: 'vsc-video-placeholder' },
+              V.utils.el('span', { className: 'codicon codicon-file-media' }));
+            media.appendChild(placeholder);
+          }
+        }
       }
     }
     // v0.5.6 第二十三轮：**无封面占位**——本地视频无任何封面图（截帧未
@@ -7021,6 +7045,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       if (c && typeof c === 'object') {
         if (typeof c.baseUrl === 'string' && c.baseUrl) baseUrl = c.baseUrl;
         var items = Array.isArray(c.items) ? c.items : [];
+        // v0.5.10：缓存加载同样应用 opts.filter（黑名单/排除词）——缓存是
+        // 历史拉取结果，可能早于黑名单/排除词变更；不过滤会让被剔除的视频
+        // 从缓存复活。仅过滤内存 queue，history 保留（persist 不变，改回条件即可恢复）。
+        if (opts.filter) items = opts.filter(items);
         // v0.6.0 自愈：旧版加密封面缓存（pic 为 blob: 会话级 URL，重启失效）
         // 是**毒缓存**——逐条清空 pic 后这些 item 仍在 seenMap（净新增=0），
         // 增量拉取永不刷新其 pic → 封面恒黑。发现任意 blob: pic 即整片作废，
@@ -15052,7 +15080,17 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
               }).catch(function () { return null; });
             },
             filter: function (items) {
-              return V.blacklist ? V.blacklist.filter(items) : items;
+              var out = V.blacklist ? V.blacklist.filter(items) : items;
+              // v0.5.10：排除词过滤放进 opts.filter——source-feed 的 filter
+              // 在网络拉取（pullOne）与缓存加载（loadCache）两路都会执行；
+              // 否则加排除词后已缓存（关键词命中但含排除词）的视频仍会显示。
+              var excls = role.exclusions;
+              if (excls && excls.length) {
+                out = out.filter(function (it) {
+                  return !exclHit(it.title, excls);
+                });
+              }
+              return out;
             },
           });
         });

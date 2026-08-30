@@ -567,7 +567,17 @@
               }).catch(function () { return null; });
             },
             filter: function (items) {
-              return V.blacklist ? V.blacklist.filter(items) : items;
+              var out = V.blacklist ? V.blacklist.filter(items) : items;
+              // v0.5.10：排除词过滤放进 opts.filter——source-feed 的 filter
+              // 在网络拉取（pullOne）与缓存加载（loadCache）两路都会执行；
+              // 否则加排除词后已缓存（关键词命中但含排除词）的视频仍会显示。
+              var excls = role.exclusions;
+              if (excls && excls.length) {
+                out = out.filter(function (it) {
+                  return !exclHit(it.title, excls);
+                });
+              }
+              return out;
             },
           });
         });
