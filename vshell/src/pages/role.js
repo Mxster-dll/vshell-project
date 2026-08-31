@@ -323,10 +323,11 @@
     box.appendChild(secKwe);
     box.appendChild(secExcls);
     box.appendChild(V.utils.el('button', {
-      className: 'vshell-btn vshell-btn-secondary',
+      className: 'vshell-btn vshell-btn-primary',
       type: 'button',
+      style: 'margin-left:auto',
       onclick: closeDlg,
-    }, '关闭'));
+    }, '完成'));
     overlay.appendChild(box);
     host.appendChild(overlay);
 
