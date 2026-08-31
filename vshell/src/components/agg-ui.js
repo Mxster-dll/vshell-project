@@ -94,8 +94,9 @@
       if (it._grp || /^grp:/.test(it.id || '')) continue;
       var src = it.sourceId || c.getAttribute('data-src') || '';
       var isMember = !!members[src + ':' + it.id];
-      if (!isMember) {
-        // 无源快照卡（charVideos/featured 旧数据缺 sourceId）：按 id 宽松匹配
+      if (!isMember && !src) {
+        // 仅无源快照卡（charVideos/featured 旧数据缺 sourceId）按 id 宽松匹配；
+        // 有源卡必须精确 (源,id) 匹配——防同 id 跨源卡误折叠/误删
         for (var k = 0; k < g.members.length; k++) {
           if (String(g.members[k].id) === String(it.id)) { isMember = true; break; }
         }
@@ -222,13 +223,27 @@
       el.appendChild(im);
     }
     var isAbs = /^(https?:|blob:|data:)/.test(url || '');
-    if (url && isAbs) showImg(url);
+    // 有解密器的源（如 17c 加密图）绝不直接显示原 URL（密文乱码）——
+    // 先占位，等 picUrlOf 解密出 blob 再回填；解密失败保持占位
+    var hasDec = !!(srcId && V.siteAdapters && V.siteAdapters.picDecryptorFor
+      && V.siteAdapters.picDecryptorFor(srcId));
+    if (url && isAbs && !hasDec) showImg(url);
     else showPlaceholder();
     if (url && srcId && item && V.aggregations && V.aggregations.picUrlOf) {
       V.aggregations.picUrlOf(srcId, item).then(function (u) {
-        if (!u) { if (!el.querySelector('img')) showPlaceholder(); return; }
-        if (u !== url) showImg(u);
-      }).catch(function () { /* 保留原图 */ });
+        if (u) { if (u !== url) showImg(u); return; }
+        refreshViaDetail();   // 解密失败（auth_key 过期等）→ 详情接口刷新 pic
+      }).catch(refreshViaDetail);
+    }
+    function refreshViaDetail() {
+      if (!item || !item.id || !srcId) return;
+      var ad;
+      try { ad = V.siteAdapters.adapterFor(srcId); } catch (e) { ad = null; }
+      if (!ad || typeof ad.getVideoDetail !== 'function') return;
+      ad.getVideoDetail(item.id).then(function (d) {
+        // 17c 详情 pic 为解密后 blob；acfun 等为完整 URL——均可直接显示
+        if (d && d.pic && d.pic !== url) showImg(d.pic);
+      }).catch(function () { /* 保持占位 */ });
     }
     return el;
   }
