@@ -22,6 +22,9 @@
   // 模块级 + 跟随 selectedName 切换重置（同角色重建保留归属）
   var kweOwner = null;
   var kweOwnerRole = null;
+  // v0.6.42：词增删时抑制面板全量重建（onChange→rerender 会重建
+  // renderDetail → 浮窗下方内容闪动）；改局部重绘所在行
+  var suppressRerender = false;
 
   /** 缩略图（有 icon 显示图片；无 icon 白底+首字；加载失败同样回退） */
   function makeThumb(c, cls) {
@@ -510,9 +513,18 @@
       V.utils.el('div', { className: 'vshell-char-kwline' }),
     ]));
     var kwLine = mainBox.querySelector('.vshell-char-kwline');
+    /** v0.6.42：重读合并条目（r 是渲染时快照；词增删后必须从 listAll 重读，
+     *  否则局部重绘看不到变化） */
+    function mergedRole() {
+      var all = V.characters.list();
+      var m = null;
+      all.forEach(function (x) { if (!m && x.name === r.name) m = x; });
+      return m;
+    }
     function renderKws() {
       kwLine.innerHTML = '';
-      (r.keywords || []).forEach(function (k) {
+      var cur = mergedRole();
+      (cur && cur.keywords || []).forEach(function (k) {
         var chip = V.utils.el('span', {
           className: 'vshell-char-kwchip',
           title: '关键词',
@@ -538,7 +550,10 @@
     function removeKw(k) {
       // v0.6.41：全源删除（跨源同名角色合并显示——旧 setKeywords 只写首个
       // 源，残留源重合并回末尾，表现为「删除后词跑到最后」）
-      V.characters.removeKeyword(r.name, k);
+      // v0.6.42：抑制全量重建 + 局部重绘关键词行（防浮窗下方闪动）
+      suppressRerender = true;
+      try { V.characters.removeKeyword(r.name, k); } finally { suppressRerender = false; }
+      renderKws();
     }
     renderKws();
 
@@ -568,9 +583,13 @@
       var v = kwInputEl.value.trim();
       if (!v) return;
       // v0.5.5：不再剔除角色名——角色名 chip 保留到用户主动删除
-      var kws = (r.keywords || []).slice();
+      // v0.6.42：从 find（首源原生条目）读——r 是跨源合并拷贝，直接写会把
+      // 合并数组整体写入首源（跨源词污染）；同时抑制全量重建改局部重绘
+      var cur = V.characters.find(r.name);
+      var kws = (cur && cur.keywords || []).slice();
       if (kws.indexOf(v) < 0) kws.push(v);
-      V.characters.setKeywords(r.name, kws);
+      suppressRerender = true;
+      try { V.characters.setKeywords(r.name, kws); } finally { suppressRerender = false; }
       kwInputEl.value = '';
       renderKws();
     }
@@ -590,17 +609,14 @@
     var kweLine = mainBox.querySelector('.vshell-char-kwex-line');
     // v0.6.36：归属关键词模块级 + 跟随角色切换重置（同角色重建保留）
     if (kweOwnerRole !== r.name) { kweOwner = null; kweOwnerRole = r.name; }
-    /** 最新 kwExclusions（r 是 listAll 拷贝，set 后需从 find 重读） */
-    function liveKwe() {
-      var lv = V.characters.find(r.name);
-      return (lv && lv.kwExclusions) || {};
-    }
     function renderKwe() {
       kweLine = mainBox.querySelector('.vshell-char-kwex-line');
       if (!kweLine) return;
       kweLine.innerHTML = '';
       var map = {};   // word → [所属关键词...]
-      var kwe = liveKwe();
+      // v0.6.42：用合并条目（跨源同名角色的独立词全量可见）
+      var cur = mergedRole();
+      var kwe = (cur && cur.kwExclusions) || {};
       Object.keys(kwe).forEach(function (kw) {
         (kwe[kw] || []).forEach(function (w) {
           if (!map[w]) map[w] = [];
@@ -656,8 +672,12 @@
     function removeKwe(w, kws) {
       kws.forEach(function (kw) {
         // v0.6.41：全源删除（同 removeKw——setKeywordExclusions 只写首源）
-        V.characters.removeKeywordExclusion(r.name, kw, w);
+        // v0.6.42：抑制全量重建 + 局部重绘独立词行
+        suppressRerender = true;
+        try { V.characters.removeKeywordExclusion(r.name, kw, w); }
+        finally { suppressRerender = false; }
       });
+      renderKwe();
     }
     renderKwe();
 
@@ -744,9 +764,15 @@
         V.toast.error('独立限制词「' + v + '」未包含所选关键词「' + kweOwner + '」，已取消');
         return;
       }
-      var list = (liveKwe()[kweOwner] || []).slice();
+      // v0.6.42：从 find（首源原生条目）读——避免把合并数组写入首源；
+      // 抑制全量重建改局部重绘
+      var cur = V.characters.find(r.name);
+      var kwe = (cur && cur.kwExclusions) || {};
+      var list = (kwe[kweOwner] || []).slice();
       if (list.indexOf(v) < 0) list.push(v);
-      V.characters.setKeywordExclusions(r.name, kweOwner, list);
+      suppressRerender = true;
+      try { V.characters.setKeywordExclusions(r.name, kweOwner, list); }
+      finally { suppressRerender = false; }
       kweInputEl.value = '';
       renderKwe();
     }
@@ -760,7 +786,8 @@
     var exLine = mainBox.querySelector('.vshell-char-exline');
     function renderExcls() {
       exLine.innerHTML = '';
-      (r.globalExclusions || []).forEach(function (x) {
+      var cur = mergedRole();
+      (cur && cur.globalExclusions || []).forEach(function (x) {
         var chip = V.utils.el('span', {
           className: 'vshell-char-kwchip',
           title: '全局排除词',
@@ -782,7 +809,10 @@
     }
     function removeExcl(x) {
       // v0.6.41：全源删除（同 removeKw——setGlobalExclusions 只写首源）
-      V.characters.removeGlobalExclusion(r.name, x);
+      // v0.6.42：抑制全量重建 + 局部重绘排除词行
+      suppressRerender = true;
+      try { V.characters.removeGlobalExclusion(r.name, x); } finally { suppressRerender = false; }
+      renderExcls();
     }
     renderExcls();
 
@@ -811,9 +841,13 @@
     function doAddExcl() {
       var v = exInputEl.value.trim();
       if (!v) return;
-      var excls = (r.globalExclusions || []).slice();
+      // v0.6.42：从 find（首源原生条目）读——避免把合并数组写入首源；
+      // 抑制全量重建改局部重绘
+      var cur = V.characters.find(r.name);
+      var excls = (cur && cur.globalExclusions || []).slice();
       if (excls.indexOf(v) < 0) excls.push(v);
-      V.characters.setGlobalExclusions(r.name, excls);
+      suppressRerender = true;
+      try { V.characters.setGlobalExclusions(r.name, excls); } finally { suppressRerender = false; }
       exInputEl.value = '';
       renderExcls();
     }
@@ -932,7 +966,11 @@
       }, '完成'),
     ]));
 
-    var offChars = V.characters.onChange(function () { rerender(); });
+    var offChars = V.characters.onChange(function () {
+      // v0.6.42：词增删走局部重绘，跳过全量重建（防浮窗下方闪动）
+      if (suppressRerender) return;
+      rerender();
+    });
 
     overlay.appendChild(box);
     overlay.addEventListener('click', function (e) {
