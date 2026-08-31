@@ -28,6 +28,7 @@ JS_FILES = [
     "core/saved.js",
     "core/watched.js",
     "core/characters.js",
+    "core/char-editor.js",   # v0.6.44 用户需求：角色主页编辑按钮（背景图/头像裁剪界面共用）
     "core/char-banners.js",
     "core/searchcache.js",
     "core/searchtags.js",

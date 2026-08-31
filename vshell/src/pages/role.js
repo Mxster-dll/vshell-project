@@ -79,66 +79,200 @@
 
     /* ---- banner 头部（背景图可设，用户需求 2b；v0.5.6 第五轮：无自定义
      *  图时用手绘默认 SVG——每个角色都有背景图） ---- */
+    /* ---- banner 头部（背景图可设，用户需求 2b；v0.5.6 第五轮：无自定义
+     *  图时用手绘默认 SVG——每个角色都有背景图） ----
+     *  v0.6.44：banner 右上角「修改背景图」按钮 + 名字右侧「重命名」按钮 +
+     *  头像悬停「编辑头像」按钮——与角色管理页同款（共用 core/char-editor.js） */
     var bannerUrl = role.banner
       || (V.charBanners && V.charBanners.bannerFor(role.name));
-    var banner = V.utils.el('div', { className: 'vshell-role-banner' + (bannerUrl ? ' has-bg' : '') });
-    if (bannerUrl) {
-      // 背景图 + 暗色渐变遮罩（保证头像/文字可读）
-      banner.style.backgroundImage = 'linear-gradient(180deg, rgba(0,0,0,0.45), rgba(0,0,0,0.82)), url("'
-        + bannerUrl + '")';
-      // v0.5.6 第十一轮（用户需求 2）：视差需留平移余量——放大到 115%
-      // （cover 时正好铺满，平移会露边）
-      banner.style.backgroundSize = '115% auto';
-      banner.style.backgroundPosition = 'center';
-      // v0.5.6 第十一轮（用户需求 2）：背景图随鼠标视差——放大留余量
-      // （background-size 115%），mousemove 按指针相对位置平移背景，
-      // mouseleave 复位到中心；has-bg 才有（渐变无图不视差）
-      // v0.5.6 第十二轮（需求 6）：视差**仅水平**——竖直方向不动
-      var parallax = function (e) {
-        var rect = banner.getBoundingClientRect();
-        if (!rect.width || !rect.height) return;
-        var nx = (e.clientX - rect.left) / rect.width - 0.5;   // -0.5..0.5
-        banner.style.backgroundPosition = (50 + nx * 14) + '% 50%';
-      };
-      var parallaxOff = function () {
-        banner.style.backgroundPosition = 'center';
-      };
-      banner.addEventListener('mousemove', parallax);
-      banner.addEventListener('mouseleave', parallaxOff);
-      banner._parallaxOff = parallaxOff;
-    } else {
-      // 渐变：选中蓝 → 编辑器背景（Fluent accent 层次，双主题自适应）
-      banner.style.background = 'linear-gradient(135deg, var(--vscode-list-activeSelectionBackground), var(--vscode-editor-background) 70%)';
-    }
+    var banner = V.utils.el('div', { className: 'vshell-role-banner' });
 
-    var head = V.utils.el('div', { className: 'vshell-role-head' }, [
-      V.utils.el('span', { className: 'vshell-role-avatar' }, (function () {
-        var box = V.utils.el('span', { className: 'vshell-role-avatar-box' });
-        var fallback = function () {
-          box.innerHTML = '';
-          box.appendChild(V.utils.el('span', { className: 'vshell-role-avatar-letter' },
-            String(role.name).charAt(0) || '?'));
-        };
-        if (role.icon) {
-          box.appendChild(V.utils.el('img', { src: role.icon, alt: '', onerror: fallback }));
-        } else {
-          fallback();
+    /** 应用（或清除）背景图；局部更新，不重建 banner（编辑保存后回调用） */
+    function applyBanner(url) {
+      bannerUrl = url || '';
+      banner.classList.toggle('has-bg', !!bannerUrl);
+      if (bannerUrl) {
+        // 背景图 + 暗色渐变遮罩（保证头像/文字可读）
+        banner.style.backgroundImage = 'linear-gradient(180deg, rgba(0,0,0,0.45), rgba(0,0,0,0.82)), url("'
+          + bannerUrl + '")';
+        // v0.5.6 第十一轮（用户需求 2）：视差需留平移余量——放大到 115%
+        // （cover 时正好铺满，平移会露边）
+        banner.style.backgroundSize = '115% auto';
+        banner.style.backgroundPosition = 'center';
+        // v0.5.6 第十一轮（用户需求 2）：背景图随鼠标视差——放大留余量
+        // （background-size 115%），mousemove 按指针相对位置平移背景，
+        // mouseleave 复位到中心；has-bg 才有（渐变无图不视差）
+        // v0.5.6 第十二轮（需求 6）：视差**仅水平**——竖直方向不动
+        if (!banner._parallaxOff) {
+          var parallax = function (e) {
+            var rect = banner.getBoundingClientRect();
+            if (!rect.width || !rect.height) return;
+            var nx = (e.clientX - rect.left) / rect.width - 0.5;   // -0.5..0.5
+            banner.style.backgroundPosition = (50 + nx * 14) + '% 50%';
+          };
+          var parallaxOff = function () {
+            banner.style.backgroundPosition = 'center';
+          };
+          banner.addEventListener('mousemove', parallax);
+          banner.addEventListener('mouseleave', parallaxOff);
+          banner._parallax = parallax;
+          banner._parallaxOff = parallaxOff;
         }
-        return box;
-      })()),
+      } else {
+        // 渐变：选中蓝 → 编辑器背景（Fluent accent 层次，双主题自适应）
+        banner.style.backgroundImage = '';
+        banner.style.background = 'linear-gradient(135deg, var(--vscode-list-activeSelectionBackground), var(--vscode-editor-background) 70%)';
+        if (banner._parallaxOff) {
+          banner.removeEventListener('mousemove', banner._parallax);
+          banner.removeEventListener('mouseleave', banner._parallaxOff);
+          banner._parallax = null;
+          banner._parallaxOff = null;
+        }
+      }
+    }
+    applyBanner(bannerUrl);
+
+    // 头像（v0.6.44：外包按钮 wrap，悬停浮现编辑 icon，点击换头像）
+    var avatarBox = null;
+    function setAvatar(iconUrl) {
+      if (!avatarBox) return;
+      var im = avatarBox.querySelector('img');
+      if (im) { im.src = iconUrl; }
+      else {
+        avatarBox.innerHTML = '';
+        avatarBox.appendChild(V.utils.el('img', { src: iconUrl, alt: '' }));
+      }
+    }
+    function updateAvatarLetter() {
+      if (!avatarBox) return;
+      var letter = avatarBox.querySelector('.vshell-role-avatar-letter');
+      if (letter) letter.textContent = String(role.name).charAt(0) || '?';
+    }
+    var avatarSpan = V.utils.el('span', { className: 'vshell-role-avatar' }, (function () {
+      avatarBox = V.utils.el('span', { className: 'vshell-role-avatar-box' });
+      var fallback = function () {
+        avatarBox.innerHTML = '';
+        avatarBox.appendChild(V.utils.el('span', { className: 'vshell-role-avatar-letter' },
+          String(role.name).charAt(0) || '?'));
+      };
+      if (role.icon) {
+        avatarBox.appendChild(V.utils.el('img', { src: role.icon, alt: '', onerror: fallback }));
+      } else {
+        fallback();
+      }
+      return avatarBox;
+    })());
+    var avatarWrap = V.utils.el('button', {
+      className: 'vshell-char-bigthumb-wrap vshell-role-avatar-wrap',
+      type: 'button',
+      title: '设置角色图片',
+      'aria-label': '设置角色图片',
+      onclick: function () {
+        if (V.charEditor) V.charEditor.pickIcon(role, function (iconUrl) { if (iconUrl) setAvatar(iconUrl); });
+      },
+    }, [
+      avatarSpan,
+      V.utils.el('span', { className: 'vshell-char-bigthumb-hover' },
+        V.utils.el('span', { className: 'codicon codicon-edit' })),
+    ]);
+
+    // 角色名（v0.6.44：右侧重命名按钮，与管理页同款交互：输入框+确认/取消）
+    var nameRow = null;
+    function renderName(nm) {
+      if (!nameRow) return;
+      nameRow.innerHTML = '';
+      nameRow.appendChild(V.utils.el('div', { className: 'vshell-role-name' }, nm));
+      nameRow.appendChild(V.utils.el('button', {
+        className: 'vshell-icon-btn vshell-char-name-edit',
+        type: 'button',
+        title: '重命名角色',
+        'aria-label': '重命名角色',
+        onclick: startRename,
+      }, V.utils.el('span', { className: 'codicon codicon-edit' })));
+    }
+    function startRename() {
+      if (!nameRow) return;
+      nameRow.innerHTML = '';
+      var inp = V.utils.el('input', {
+        className: 'vshell-char-name-input',
+        type: 'text',
+        value: role.name,
+        'aria-label': '角色新名称',
+        onkeydown: function (e) {
+          if (e.key === 'Enter') { e.preventDefault(); doRename(inp); }
+          else if (e.key === 'Escape') { cancelRename(); }
+        },
+      });
+      nameRow.appendChild(inp);
+      nameRow.appendChild(V.utils.el('button', {
+        className: 'vshell-icon-btn vshell-char-name-confirm',
+        type: 'button',
+        title: '确认改名',
+        'aria-label': '确认改名',
+        onclick: function () { doRename(inp); },
+      }, V.utils.el('span', { className: 'codicon codicon-check' })));
+      nameRow.appendChild(V.utils.el('button', {
+        className: 'vshell-icon-btn vshell-char-name-cancel',
+        type: 'button',
+        title: '取消',
+        'aria-label': '取消',
+        onclick: cancelRename,
+      }, V.utils.el('span', { className: 'codicon codicon-close' })));
+      try { inp.focus(); inp.select(); } catch (e) { /* noop */ }
+    }
+    function doRename(inp) {
+      var nn = inp.value.trim();
+      if (!nn || nn === role.name) { cancelRename(); return; }
+      var oldN = role.name;
+      if (!V.characters.rename(oldN, nn)) {
+        if (V.toast) V.toast.error('改名失败：名称无效或已存在');
+        return;
+      }
+      role.name = nn;
+      if (V.toast) V.toast.ok('已重命名：' + oldN + ' → ' + nn);
+      // URL 跟随新名（replaceState 不触发 hashchange → 页面保留、滚动不丢）
+      try { history.replaceState(null, '', '#/role/' + encodeURIComponent(nn)); } catch (e) { /* noop */ }
+      renderName(nn);
+      updateAvatarLetter();
+      if (statsEl) statsEl.textContent = '手动添加 ' + V.characters.videosOf(nn).length + ' · 聚合搜索计算中';
+    }
+    function cancelRename() {
+      renderName(role.name);
+    }
+    nameRow = V.utils.el('div', { className: 'vshell-role-dname-row' });
+
+    var statsEl = null;
+    var head = V.utils.el('div', { className: 'vshell-role-head' }, [
+      avatarWrap,
       V.utils.el('div', { className: 'vshell-role-head-info' }, [
-        V.utils.el('div', { className: 'vshell-role-name' }, role.name),
+        nameRow,
         V.utils.el('div', { className: 'vshell-role-chips' },
           (role.keywords || []).filter(Boolean).map(function (k) {
             return V.utils.el('span', { className: 'vshell-st-chip' },
               V.utils.el('span', { className: 'vshell-st-chip-label' }, k));
           })),
-        V.utils.el('div', { className: 'vshell-role-stats' }, '手动添加 '
-          + V.characters.videosOf(role.name).length + ' · 聚合搜索计算中'),
+        (function () {
+          statsEl = V.utils.el('div', { className: 'vshell-role-stats' }, '手动添加 '
+            + V.characters.videosOf(role.name).length + ' · 聚合搜索计算中');
+          return statsEl;
+        })(),
       ]),
     ]);
     banner.appendChild(head);
+
+    // v0.6.44：banner 右上角「修改背景图」按钮（与管理页 .vshell-char-banner-set 同款）
+    banner.appendChild(V.utils.el('button', {
+      className: 'vshell-icon-btn vshell-role-banner-edit',
+      type: 'button',
+      title: role.banner ? '更换主页背景图' : '设置主页背景图',
+      'aria-label': '设置主页背景图',
+      onclick: function () {
+        if (V.charEditor) V.charEditor.pickBanner(role, function (url) { if (url) applyBanner(url); });
+      },
+    }, V.utils.el('span', { className: 'codicon codicon-file-media' })));
+
     page.appendChild(banner);
+    renderName(role.name);
 
     /* ---- 代表作横卡（v0.5.6 第四轮，用户需求 2c） ---- */
     var featuredHost = V.utils.el('div', { className: 'vshell-role-featuredhost' });

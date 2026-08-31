@@ -583,6 +583,36 @@
   color: var(--vscode-foreground);
   line-height: 1.2;
 }
+/* v0.6.44：角色名行（名称 + 重命名按钮；编辑态 = 输入框 + 确认/取消，
+   复用 char-panel 的 .vshell-char-name-edit/.vshell-char-name-input 等类） */
+.vshell-role-dname-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.vshell-role-dname-row .vshell-role-name {
+  flex: 1;
+  min-width: 0;
+}
+/* v0.6.44：banner 右上角「修改背景图」按钮（半透明黑底保证浅色主题无图
+   渐变上也可见） */
+.vshell-role-banner-edit {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(0, 0, 0, 0.35);
+}
+.vshell-role-banner-edit:hover {
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+}
+/* v0.6.44：头像悬停压暗（wrap 复用 .vshell-char-bigthumb-wrap 的 hover icon 浮现） */
+.vshell-role-avatar-wrap:hover .vshell-role-avatar-box img {
+  filter: brightness(0.6);
+}
 .vshell-role-chips {
   display: flex;
   flex-wrap: wrap;
