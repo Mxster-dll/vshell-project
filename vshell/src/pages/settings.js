@@ -462,10 +462,10 @@
       wrap.appendChild(cbtn);
       return wrap;
     })()));
-    // 关于
+    // 关于（版本号显示构建版本 v，与导航栏左上角一致）
     body.appendChild(sec('关于', V.utils.el('div', {
       className: 'vshell-settings-about',
-    }, 'vshell v0.5.6 · VS Code Modern 主题')));
+    }, 'vshell ' + (V.version || '') + ' · VS Code Modern 主题')));
 
     page.appendChild(body);
     outlet.appendChild(page);

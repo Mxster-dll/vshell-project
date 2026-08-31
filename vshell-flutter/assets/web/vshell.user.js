@@ -21,6 +21,11 @@
 // @noframes
 // ==/UserScript==
 
+/* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
+ * 显示于导航栏左上角品牌位与设置页「关于」区 */
+window.VShell = window.VShell || {};
+window.VShell.version = 'v54';
+
 /* vshell 入口见 src/app.js */
 
 
@@ -4343,6 +4348,27 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       return s;
     } catch (e) { return { acfun: 1, local: 1 }; }
   }
+  /** 从墙缓存分片（vshell.wall.*.<srcId>）查成员标题（主成员换源时用） */
+  function titleFromCache(srcId, vid) {
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var lk = localStorage.key(i);
+        if (lk && lk.indexOf('vshell.wall.') === 0 && lk.indexOf('.' + srcId) === lk.length - srcId.length - 1) {
+          try {
+            var data = JSON.parse(localStorage.getItem(lk));
+            if (data && data.items) {
+              for (var j = 0; j < data.items.length; j++) {
+                if (data.items[j] && String(data.items[j].id) === String(vid) && data.items[j].title) {
+                  return data.items[j].title;
+                }
+              }
+            }
+          } catch (e) { /* noop */ }
+        }
+      }
+    } catch (e) { /* noop */ }
+    return '';
+  }
   /** v0.6.1 启动清理：auto 组移除未激活源成员（隐私源语义：不加载不显示），
    *  空组删除、主成员落回激活源、pending 未激活源索引清除 */
   function cleanInactive() {
@@ -4359,6 +4385,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       if (!active[gd.coverSrc]) {
         gd.coverSrc = gd.members[0].src;
         gd.cover = '';   // 主成员换源，封面暂缺（组卡用占位+标题）
+        // 标题也换：新主成员标题从缓存取（避免残留未激活源的标题）
+        var nt = titleFromCache(gd.members[0].src, gd.members[0].id);
+        if (nt) gd.title = nt;
       }
     });
     Object.keys(map.pending).forEach(function (k) {
@@ -4779,8 +4808,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var brand = V.utils.el('span', { className: 'vshell-nav-brand' }, [
       V.utils.el('span', { className: 'vshell-nav-brand-dot' }),
       V.utils.el('span', { className: 'vshell-nav-brand-text' }, 'VShell'),
-      // 版本号：与 src/meta.js @version 同步（用户确认加载版本用）
-      V.utils.el('span', { className: 'vshell-nav-brand-ver' }, 'v0.5.6'),
+      // 版本号：构建版本（meta.js V.version，与 app.html ?v=N 同步）
+      V.utils.el('span', { className: 'vshell-nav-brand-ver' }, V.version || ''),
     ]);
 
     // 右：搜索框 = 多输入框胶囊编辑器（v0.3.26 重构，用户需求）：
@@ -16463,10 +16492,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       wrap.appendChild(cbtn);
       return wrap;
     })()));
-    // 关于
+    // 关于（版本号显示构建版本 v，与导航栏左上角一致）
     body.appendChild(sec('关于', V.utils.el('div', {
       className: 'vshell-settings-about',
-    }, 'vshell v0.5.6 · VS Code Modern 主题')));
+    }, 'vshell ' + (V.version || '') + ' · VS Code Modern 主题')));
 
     page.appendChild(body);
     outlet.appendChild(page);

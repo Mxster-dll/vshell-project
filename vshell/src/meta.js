@@ -21,4 +21,9 @@
 // @noframes
 // ==/UserScript==
 
+/* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
+ * 显示于导航栏左上角品牌位与设置页「关于」区 */
+window.VShell = window.VShell || {};
+window.VShell.version = 'v54';
+
 /* vshell 入口见 src/app.js */
