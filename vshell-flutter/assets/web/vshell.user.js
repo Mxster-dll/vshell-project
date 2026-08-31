@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = 'v60';
+window.VShell.version = 'v61';
 
 /* vshell 入口见 src/app.js */
 
@@ -4319,6 +4319,19 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     while (y) { n += y & 1; y >>>= 1; }
     return n;
   }
+  /** v0.6.3 低信息 phash 判定：64 位中 1 的占比 ∈ [15%, 85%] 才算有效。
+   *  全 1 / 全 0 / 接近纯色（图床对失效封面统一返回的白色占位图、纯黑、
+   *  空画布等）→ 所有视频算出同一 phash → 误聚合（曾出现 539 个 kkav
+   *  视频并为一组）。这类封面无法表达内容，不参与自动聚合。 */
+  function phashInfoValid(h) {
+    if (!h) return false;
+    var n = 0;
+    var v1 = (h[0] || 0) >>> 0, v2 = (h[1] || 0) >>> 0;
+    while (v1) { n += v1 & 1; v1 >>>= 1; }
+    while (v2) { n += v2 & 1; v2 >>>= 1; }
+    var ratio = n / 64;
+    return ratio >= 0.15 && ratio <= 0.85;
+  }
 
   /** 解析可绘制封面 URL：17c 加密图先解密（picDecryptor）；相对路径拼 baseUrl */
   function resolvePicUrl(srcId, item, baseUrl) {
@@ -4398,6 +4411,14 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     Object.keys(map.groups).forEach(function (g) {
       var gd = map.groups[g];
       if (!gd.auto) return;
+      // v0.6.3：低信息 repPhash（封面解析成图床默认白图/纯色 → 大量视频
+      // 同一 phash 误聚合，曾 539 个 kkav 视频并为一组）→ 整组作废删除，
+      // 成员释放回单卡（phash 无效无法判断相似性，宁可拆开不误并）
+      if (!phashInfoValid(gd.repPhash)) {
+        delete map.groups[g];
+        changed = true;
+        return;
+      }
       var before = gd.members.length;
       gd.members = gd.members.filter(function (m) { return active[m.src]; });
       if (!gd.members.length) { delete map.groups[g]; changed = true; return; }
@@ -4442,11 +4463,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     return resolvePicUrl(srcId, item, job.baseUrl).then(function (u) {
       if (!u) return;
       return phashOf(u).then(function (h) {
-        if (!h) return;
+        if (!h || !phashInfoValid(h)) return;   // v0.6.3：低信息 phash（默认占位图）不聚合
         var gs = map.groups;
         for (var g in gs) {                                    // 视频 vs 组内成员
           var gd = gs[g];
-          if (gd.repPhash && hamming(h, gd.repPhash) <= PHASH_DIST) {
+          if (gd.repPhash && phashInfoValid(gd.repPhash) && hamming(h, gd.repPhash) <= PHASH_DIST) {
             addToGroup(g, { src: srcId, id: item.id });
             return;
           }
@@ -4454,7 +4475,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         var pend = map.pending;
         for (var k in pend) {                                  // 视频 vs 视频 → 自动建组
           var p = pend[k];
-          if (p && p.h && hamming(h, p.h) <= PHASH_DIST) {
+          if (p && p.h && phashInfoValid(p.h) && hamming(h, p.h) <= PHASH_DIST) {
             var ci = k.indexOf(':');
             var m2 = { src: k.slice(0, ci), id: k.slice(ci + 1) };
             var meta = {};
