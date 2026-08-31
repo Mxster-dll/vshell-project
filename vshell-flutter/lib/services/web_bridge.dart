@@ -177,6 +177,9 @@ class WebBridge {
             sendTimeout: Duration(milliseconds: timeout),
             responseType: ResponseType.plain,
             headers: headers,
+            // 2026-09-01（17c 域名自动更新）：站方反爬返回 HTTP 888 挑战页，
+            // 必须拿到 body 才能分析挑战逻辑——所有状态码都当正常响应返回
+            validateStatus: (_) => true,
           ));
           final resp = method == 'POST'
               ? await dio.post(url, data: opts['body'])
