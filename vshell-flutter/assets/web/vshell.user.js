@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.54
+// @version      0.6.55
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.54';
+window.VShell.version = '0.6.55';
 
 /* vshell 入口见 src/app.js */
 
@@ -25722,9 +25722,9 @@ body.vshell-dragging a { pointer-events: none; }
   flex-direction: column;
   /* 用户需求：banner/代表作/视频墙区块间距 = 设置「卡片间距」（与主页墙一致，等距） */
   gap: var(--vshell-card-gap, 6px);   /* 原 6px（v0.5.6 第二十轮需求 2：16px → 6px） */
-  /* 用户需求：角色主页与主页/搜索页一致不占满宽度（左右 10%）；
-     上下保持 20/48 */
-  padding: 20px 10% 48px;
+  /* v0.6.55：背景卡片距顶部与主页分类卡片一致（主页 = padding-top 0 +
+     .vshell-sections margin-top 3px → 这里 padding-top 3px） */
+  padding: 3px 10% 48px;
 }
 /* v0.6.53：返回按钮浮动定位（仿详情页 .vshell-detail-back）——绝对定位
    在角色背景左侧，完全脱离文档流不影响背景卡片位置；「角色主页」标题已删
