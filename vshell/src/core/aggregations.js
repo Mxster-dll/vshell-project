@@ -48,6 +48,23 @@
       }
     } catch (e) { /* noop */ }
   }
+  /** v0.6.3 清空全部聚合（用户需求：取消所有聚合组——含手动——重新自动聚合）：
+   *  内存 map（load 有缓存，仅删 localStorage 不够）/ scanned 去重集 /
+   *  扫描队列 / localStorage / VsStore 全清；之后 scanCache 重新按 phash 自动建组 */
+  function reset() {
+    map = { groups: {}, pending: {} };
+    scanned = {};
+    scanQueue = [];
+    scanRunning = false;
+    // 必须用 V.store.del：直接 localStorage.removeItem 不清 store.mem 缓存，
+    // 排队中的 flushPersist 会用 mem 里的旧数据写回（实测残留 14 组）。
+    try { V.store.del(KEY); } catch (e) { /* noop */ }
+    try {
+      if (window.__VS_STORE_BRIDGE__ && window.__VS_STORE_BRIDGE__.del) {
+        window.__VS_STORE_BRIDGE__.del(KEY);
+      }
+    } catch (e) { /* noop */ }
+  }
   function notify() {
     if (window.__VS_SETTINGS_OPEN__) return;
     for (var i = 0; i < listeners.length; i++) {
@@ -525,6 +542,7 @@
     setTitleCover: setTitleCover,
     setPart: setPart,
     removeGroup: removeGroup,
+    reset: reset,   // v0.6.3：清空全部聚合组重新自动聚合
     orderMembers: orderMembers,
     scheduleScan: scheduleScan,
     scanCache: scanCache,
