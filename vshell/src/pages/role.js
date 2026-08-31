@@ -408,8 +408,15 @@
           + bannerUrl + '")';
         banner.style.backgroundSize = 'cover';
         banner.style.backgroundPosition = 'center';
-        // 焦点几何需要图片尺寸——图加载完成后精算
-        var focus = (role && role.bannerFocus) || { cx: 0.5, cy: 0.5 };
+        // 焦点几何需要图片尺寸——图加载完成后精算。
+        // v0.6.57：焦点**实时重读**（find 取最新数据）——pickBanner onSaved
+        // 回调里 role 是 mount 快照（bannerFocus 为旧值），直接读快照会导致
+        // 「刚设置的中心点不生效、看起来都一样」
+        var focus = { cx: 0.5, cy: 0.5 };
+        try {
+          var liveFocus = V.characters.find(role.name);
+          if (liveFocus && liveFocus.bannerFocus) focus = liveFocus.bannerFocus;
+        } catch (e) { /* noop */ }
         var probe = new Image();
         probe.onload = function () {
           var W = banner.clientWidth, H = banner.clientHeight;

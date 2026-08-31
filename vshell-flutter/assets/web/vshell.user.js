@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.56
+// @version      0.6.57
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.56';
+window.VShell.version = '0.6.57';
 
 /* vshell 入口见 src/app.js */
 
@@ -17622,8 +17622,15 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           + bannerUrl + '")';
         banner.style.backgroundSize = 'cover';
         banner.style.backgroundPosition = 'center';
-        // 焦点几何需要图片尺寸——图加载完成后精算
-        var focus = (role && role.bannerFocus) || { cx: 0.5, cy: 0.5 };
+        // 焦点几何需要图片尺寸——图加载完成后精算。
+        // v0.6.57：焦点**实时重读**（find 取最新数据）——pickBanner onSaved
+        // 回调里 role 是 mount 快照（bannerFocus 为旧值），直接读快照会导致
+        // 「刚设置的中心点不生效、看起来都一样」
+        var focus = { cx: 0.5, cy: 0.5 };
+        try {
+          var liveFocus = V.characters.find(role.name);
+          if (liveFocus && liveFocus.bannerFocus) focus = liveFocus.bannerFocus;
+        } catch (e) { /* noop */ }
         var probe = new Image();
         probe.onload = function () {
           var W = banner.clientWidth, H = banner.clientHeight;
