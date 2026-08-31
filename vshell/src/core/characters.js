@@ -5,7 +5,7 @@
  * → 为通用性统一用「角色」指代增强后的标签功能。
  *
  * store 键（store 自动加 vshell. 前缀，按数据源 scopedKey）：
- *  - 'characters'：角色列表 [{name, icon, keywords:[...], exclusions:[...]}]
+ *  - 'characters'：角色列表 [{name, icon, keywords:[...], globalExclusions:[...], kwExclusions:{kw:[...]}}]
  *  - 'videoChars'：{videoId: [roleName,...]}——**全部**已赋予角色
  *    （手动赋予 + 自动赋予统一存这里，数组）
  *  - 'charManuals'：{videoId: {names:[手动角色...], at}}——**手动名单**。
@@ -72,11 +72,26 @@
       ? t.keywords.map(function (k) { return String(k).trim(); }).filter(Boolean)
       : [];
     if (!kws.length) kws = [name];          // 关键词缺省 = 角色名
-    // v0.5.9：排除词——标题含任一排除词 → 视频墙/角色页匹配不命中
-    var excls = Array.isArray(t.exclusions)
-      ? t.exclusions.map(function (x) { return String(x).trim(); }).filter(Boolean)
-      : [];
-    excls = excls.filter(function (x, i, a) { return a.indexOf(x) === i; });
+    // v0.5.9 排除词；v0.6.31 显式改名**全局排除词**（globalExclusions）——
+    // 标题含任一全局排除词 → 视频墙/角色页匹配整段失败。读时兼容旧
+    // exclusions 字段（旧数据自动迁移）。
+    var gexcls = Array.isArray(t.globalExclusions) ? t.globalExclusions
+      : (Array.isArray(t.exclusions) ? t.exclusions : []);
+    gexcls = gexcls.map(function (x) { return String(x).trim(); }).filter(Boolean);
+    gexcls = gexcls.filter(function (x, i, a) { return a.indexOf(x) === i; });
+    // v0.6.31 **独立词排除**（按关键词绑定）：{ keyword: [排除词...] }——
+    // 关键词必须**独立出现**：排除词内部的该关键词不算命中（如关键词
+    // string + 排除词 substring → substring 里的 string 不算；标题别处
+    // 独立的 string 仍算命中）。只对绑定的关键词生效，其他关键词不受影响。
+    var kwe = {};
+    if (t.kwExclusions && typeof t.kwExclusions === 'object') {
+      Object.keys(t.kwExclusions).forEach(function (kw) {
+        var arr = Array.isArray(t.kwExclusions[kw]) ? t.kwExclusions[kw] : [];
+        arr = arr.map(function (x) { return String(x).trim(); }).filter(Boolean);
+        arr = arr.filter(function (x, i, a) { return a.indexOf(x) === i; });
+        if (arr.length) kwe[kw] = arr;
+      });
+    }
     // v0.5.6 第四轮：banner（角色主页背景图）/ featured（代表作 videoId）随角色持久化
     // v0.5.6 第十轮：featuredMeta（代表作视频快照，marquee 卡数据源）
     // v0.5.6 第二十轮需求 4：**多个代表作**——featured 由单值改数组，
@@ -100,7 +115,8 @@
       name: name,
       icon: String(t.icon || ''),
       keywords: kws,
-      exclusions: excls,
+      globalExclusions: gexcls,
+      kwExclusions: kwe,
       banner: String(t.banner || ''),
       featured: fds,
       featuredMetas: fms,
@@ -289,7 +305,10 @@
             name: c.name,
             icon: c.icon || '',
             keywords: (c.keywords || []).slice(),
-            exclusions: (c.exclusions || []).slice(),
+            // v0.6.31：全局排除词 + 独立词排除（按关键词绑定）随合并条目输出
+            globalExclusions: (c.globalExclusions || []).slice(),
+            kwExclusions: c.kwExclusions && typeof c.kwExclusions === 'object'
+              ? Object.assign({}, c.kwExclusions) : {},
             banner: c.banner || '',
             featured: (c.featured || []).slice(),
             featuredMetas: c.featuredMetas ? Object.assign({}, c.featuredMetas) : {},
@@ -305,10 +324,22 @@
               if (k && m.keywords.indexOf(k) < 0) m.keywords.push(k);
             });
           }
-          // v0.5.9：排除词并集（跨源同名角色合并——任一源排除词都生效）
-          if (c.exclusions && c.exclusions.length) {
-            c.exclusions.forEach(function (x) {
-              if (x && m.exclusions.indexOf(x) < 0) m.exclusions.push(x);
+          // v0.6.31 全局排除词并集（原 v0.5.9 排除词——跨源同名角色合并，
+          // 任一源排除词都生效）
+          if (c.globalExclusions && c.globalExclusions.length) {
+            c.globalExclusions.forEach(function (x) {
+              if (x && m.globalExclusions.indexOf(x) < 0) m.globalExclusions.push(x);
+            });
+          }
+          // v0.6.31 独立词排除并集（同名角色同一关键词的独立词排除合并）
+          if (c.kwExclusions && typeof c.kwExclusions === 'object') {
+            Object.keys(c.kwExclusions).forEach(function (kw) {
+              var arr = c.kwExclusions[kw] || [];
+              if (!arr.length) return;
+              var mArr = m.kwExclusions[kw] || (m.kwExclusions[kw] = []);
+              arr.forEach(function (x) {
+                if (x && mArr.indexOf(x) < 0) mArr.push(x);
+              });
             });
           }
           // featured 并集（跨源代表作聚合）
@@ -591,6 +622,12 @@
         c.keywords = arr.map(function (k) { return String(k).trim(); })
           .filter(Boolean)
           .filter(function (k, i, a) { return a.indexOf(k) === i; });
+        // v0.6.31：被删除关键词的独立词排除一并清理
+        if (c.kwExclusions && typeof c.kwExclusions === 'object') {
+          Object.keys(c.kwExclusions).forEach(function (kw) {
+            if (c.keywords.indexOf(kw) < 0) delete c.kwExclusions[kw];
+          });
+        }
         found = true;
       }
     });
@@ -598,9 +635,10 @@
     return found;
   }
 
-  /** 排除词：setExclusions(name, [excl,...])（trim+去重；v0.5.9——
-   *  标题含任一排除词 → 视频墙/角色页匹配不命中） */
-  function setExclusions(name, excls) {
+  /** 全局排除词：setGlobalExclusions(name, [excl,...])（trim+去重；v0.5.9
+   *  排除词 → v0.6.31 显式改名全局排除词——标题含任一 → 视频墙/角色页
+   *  匹配整段失败。setExclusions 保留为兼容别名）。 */
+  function setGlobalExclusions(name, excls) {
     var sid = srcOfRole(name);
     if (!sid) return false;
     var d = dataOf(sid);
@@ -608,7 +646,7 @@
     d.chars.forEach(function (c) {
       if (c.name === name) {
         var arr = Array.isArray(excls) ? excls : [];
-        c.exclusions = arr.map(function (x) { return String(x).trim(); })
+        c.globalExclusions = arr.map(function (x) { return String(x).trim(); })
           .filter(Boolean)
           .filter(function (x, i, a) { return a.indexOf(x) === i; });
         found = true;
@@ -616,6 +654,74 @@
     });
     if (found) { persistSrcData(sid, d); notify(); }
     return found;
+  }
+  /** v0.5.9 旧名兼容别名 */
+  function setExclusions(name, excls) { return setGlobalExclusions(name, excls); }
+
+  /** v0.6.31 **独立词排除**：setKeywordExclusions(name, keyword, [excl,...])——
+   *  该关键词必须独立出现（排除词内部的该关键词不算命中），只影响绑定的
+   *  关键词。list 为空数组 → 解除该关键词的独立词排除。 */
+  function setKeywordExclusions(name, keyword, list) {
+    var sid = srcOfRole(name);
+    if (!sid) return false;
+    var d = dataOf(sid);
+    var found = false;
+    d.chars.forEach(function (c) {
+      if (c.name === name) {
+        var kw = String(keyword || '').trim();
+        if (!kw) return;
+        var arr = Array.isArray(list) ? list : [];
+        arr = arr.map(function (x) { return String(x).trim(); })
+          .filter(Boolean)
+          .filter(function (x, i, a) { return a.indexOf(x) === i; });
+        if (!c.kwExclusions || typeof c.kwExclusions !== 'object') c.kwExclusions = {};
+        if (arr.length) c.kwExclusions[kw] = arr;
+        else delete c.kwExclusions[kw];
+        found = true;
+      }
+    });
+    if (found) { persistSrcData(sid, d); notify(); }
+    return found;
+  }
+
+  /** v0.6.31 **独立词命中**（导出供角色页等复用）：标题含关键词且**至少
+   *  一次出现**不被任一独立词排除区间覆盖 → true。
+   *  lowTitle 已小写；lowKw 已小写；kwExcls = [排除词,...]（原始大小写）。
+   *  例：关键词 string、排除词 substring——标题仅「substring」→ string
+   *  的出现 [0,6) 被 [0,9) 覆盖 → false；标题「abc string def」→ 独立
+   *  出现 → true；标题「substring string」→ 有一次独立 → true。 */
+  function kwHitTitle(lowTitle, lowKw, kwExcls) {
+    if (!lowKw || !lowTitle || lowTitle.indexOf(lowKw) < 0) return false;
+    if (!kwExcls || !kwExcls.length) return true;
+    // 关键词全部出现区间（允许重叠：aa 在 aaa 中出现 2 次）
+    var kwSpans = [];
+    var p = 0;
+    while (true) {
+      var i = lowTitle.indexOf(lowKw, p);
+      if (i < 0) break;
+      kwSpans.push([i, i + lowKw.length]);
+      p = i + 1;
+    }
+    if (!kwSpans.length) return false;
+    // 全部排除词的区间
+    var exSpans = [];
+    kwExcls.forEach(function (e) {
+      var le = String(e).toLowerCase();
+      if (!le) return;
+      var q = 0;
+      while (true) {
+        var j = lowTitle.indexOf(le, q);
+        if (j < 0) break;
+        exSpans.push([j, j + le.length]);
+        q = j + 1;
+      }
+    });
+    // 关键词至少一次出现不被任一排除词区间覆盖
+    return kwSpans.some(function (sp) {
+      return !exSpans.some(function (ex) {
+        return ex[0] <= sp[0] && ex[1] >= sp[1];
+      });
+    });
   }
 
   /** 标题关键词匹配（按源）：返回命中的角色对象数组（列表顺序；一个角色只算一次） */
@@ -628,18 +734,23 @@
     var low = String(title).toLowerCase();
     var out = [];
     d.chars.forEach(function (c) {
-      var hit = c.keywords.some(function (k) {
-        return k && low.indexOf(String(k).toLowerCase()) >= 0;
+      var hit = false;
+      (c.keywords || []).forEach(function (k) {
+        if (!k) return;
+        // v0.6.31 独立词排除：该关键词必须独立出现（排除词内部不算）
+        var kwe = (c.kwExclusions && c.kwExclusions[k]) || null;
+        if (kwHitTitle(low, String(k).toLowerCase(), kwe)) hit = true;
       });
-      // v0.5.9：排除词——关键词命中但标题含任一排除词 → 不命中
-      if (hit && (c.exclusions || []).some(function (x) {
+      // v0.6.31 全局排除词（原 v0.5.9 exclusions）——标题含任一 → 整段失败
+      if (hit && (c.globalExclusions || []).some(function (x) {
         return x && low.indexOf(String(x).toLowerCase()) >= 0;
       })) hit = false;
       if (hit) out.push({
         name: c.name,
         icon: c.icon,
         keywords: c.keywords.slice(),
-        exclusions: (c.exclusions || []).slice(),
+        globalExclusions: (c.globalExclusions || []).slice(),
+        kwExclusions: c.kwExclusions ? Object.assign({}, c.kwExclusions) : {},
       });
     });
     return out;
@@ -735,7 +846,11 @@
       banner: srcChar ? srcChar.banner || '' : '',
       keywords: srcChar && srcChar.keywords && srcChar.keywords.length
         ? srcChar.keywords.slice() : [name],
-      exclusions: srcChar && srcChar.exclusions ? srcChar.exclusions.slice() : [],
+      // v0.6.31：副本同样复制全局排除词 + 独立词排除（跨源匹配语义一致）
+      globalExclusions: srcChar && srcChar.globalExclusions
+        ? srcChar.globalExclusions.slice() : [],
+      kwExclusions: srcChar && srcChar.kwExclusions && typeof srcChar.kwExclusions === 'object'
+        ? Object.assign({}, srcChar.kwExclusions) : {},
     });
   }
 
@@ -1062,7 +1177,10 @@
     setFeatured: setFeatured,             // v0.5.6 第四轮：代表作 videoId
     featuredOf: featuredOf,               // v0.5.6 第十九轮：全局代表作圆点
     setKeywords: setKeywords,
-    setExclusions: setExclusions,       // v0.5.9：排除词（标题命中即不匹配）
+    setExclusions: setExclusions,       // v0.5.9 旧名别名 → setGlobalExclusions
+    setGlobalExclusions: setGlobalExclusions,     // v0.6.31：全局排除词
+    setKeywordExclusions: setKeywordExclusions,   // v0.6.31：独立词排除（按关键词绑定）
+    kwHitTitle: kwHitTitle,             // v0.6.31：独立词命中判定（导出供角色页等复用）
     rename: rename,                     // v0.5.9：角色改名（全关联迁移）
     matchTitle: matchTitle,
     getChar: getChar,                     // v0.6.30：返回角色名**数组**

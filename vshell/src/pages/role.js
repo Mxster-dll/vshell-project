@@ -533,15 +533,23 @@
      *  v0.5.6 第五轮：结果再按关键词**精确过滤**（用户需求 3）——bilibili
      *  搜索是模糊匹配（标题/简介/标签），角色主页要求精确：标题必须包含
      *  角色的任一关键词，否则剔除（手动添加的视频不走聚合，不受影响） */
+    /** 关键词命中（v0.6.31 独立词语义）：标题含关键词且**至少一次出现**
+     *  不被该关键词的独立词排除覆盖；无独立词排除时退化为包含判断。 */
     function kwHit(title, kws) {
       if (!title) return false;
       var low = String(title).toLowerCase();
+      var kweMap = (role && role.kwExclusions) || {};
       return kws.some(function (k) {
-        return k && low.indexOf(String(k).toLowerCase()) >= 0;
+        if (!k) return false;
+        var lk = String(k).toLowerCase();
+        var kwe = kweMap[k] || null;
+        return V.characters && V.characters.kwHitTitle
+          ? V.characters.kwHitTitle(low, lk, kwe)
+          : low.indexOf(lk) >= 0;
       });
     }
 
-    /** v0.5.9：排除词命中——标题含任一排除词 → true（聚合/本地都要剔除） */
+    /** v0.6.31 全局排除词命中——标题含任一全局排除词 → true（聚合/本地都要剔除） */
     function exclHit(title, excls) {
       if (!title || !excls || !excls.length) return false;
       var low = String(title).toLowerCase();
@@ -575,10 +583,10 @@
               }).then(function (res) {
                 if (!res) return null;   // 失败/未就绪 → null（可重试），不落坏缓存
                 var kwsNow = aggKws();
-                // v0.5.9：排除词——标题含任一排除词的视频不进角色页
+                // v0.5.9：全局排除词——标题含任一全局排除词的视频不进角色页
                 res.items = (res.items || []).filter(function (it) {
                   return it && it.id && kwHit(it.title, kwsNow)
-                    && !exclHit(it.title, role.exclusions);
+                    && !exclHit(it.title, role.globalExclusions);
                 });
                 return res;
               }).catch(function () { return null; });
@@ -588,8 +596,8 @@
               // v0.5.10：排除词过滤放进 opts.filter——source-feed 的 filter
               // 在网络拉取（pullOne）与缓存加载（loadCache）两路都会执行；
               // 否则加排除词后已缓存（关键词命中但含排除词）的视频仍会显示。
-              // v0.6.30：排除词用**合并条目**（多源同名角色排除词并集）
-              var excls = role.exclusions;
+              // v0.6.30：全局排除词用**合并条目**（多源同名角色排除词并集）
+              var excls = role.globalExclusions;
               if (excls && excls.length) {
                 out = out.filter(function (it) {
                   return !exclHit(it.title, excls);
@@ -695,7 +703,7 @@
       (list || []).forEach(function (lv) {
         if (!lv || !lv.id) return;
         if (!kwHit(lv.title, kws)) return;
-        if (exclHit(lv.title, role.exclusions)) return;   // v0.5.9 排除词
+        if (exclHit(lv.title, role.globalExclusions)) return;   // v0.5.9 全局排除词
         if (!lv.sourceId) lv.sourceId = 'local';   // 归属标注（详情路由）
         agg.localItems.push(lv);
       });

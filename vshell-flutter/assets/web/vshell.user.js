@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.30
+// @version      0.6.31
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.30';
+window.VShell.version = '0.6.31';
 
 /* vshell 入口见 src/app.js */
 
@@ -1052,7 +1052,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
  * → 为通用性统一用「角色」指代增强后的标签功能。
  *
  * store 键（store 自动加 vshell. 前缀，按数据源 scopedKey）：
- *  - 'characters'：角色列表 [{name, icon, keywords:[...], exclusions:[...]}]
+ *  - 'characters'：角色列表 [{name, icon, keywords:[...], globalExclusions:[...], kwExclusions:{kw:[...]}}]
  *  - 'videoChars'：{videoId: [roleName,...]}——**全部**已赋予角色
  *    （手动赋予 + 自动赋予统一存这里，数组）
  *  - 'charManuals'：{videoId: {names:[手动角色...], at}}——**手动名单**。
@@ -1119,11 +1119,26 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       ? t.keywords.map(function (k) { return String(k).trim(); }).filter(Boolean)
       : [];
     if (!kws.length) kws = [name];          // 关键词缺省 = 角色名
-    // v0.5.9：排除词——标题含任一排除词 → 视频墙/角色页匹配不命中
-    var excls = Array.isArray(t.exclusions)
-      ? t.exclusions.map(function (x) { return String(x).trim(); }).filter(Boolean)
-      : [];
-    excls = excls.filter(function (x, i, a) { return a.indexOf(x) === i; });
+    // v0.5.9 排除词；v0.6.31 显式改名**全局排除词**（globalExclusions）——
+    // 标题含任一全局排除词 → 视频墙/角色页匹配整段失败。读时兼容旧
+    // exclusions 字段（旧数据自动迁移）。
+    var gexcls = Array.isArray(t.globalExclusions) ? t.globalExclusions
+      : (Array.isArray(t.exclusions) ? t.exclusions : []);
+    gexcls = gexcls.map(function (x) { return String(x).trim(); }).filter(Boolean);
+    gexcls = gexcls.filter(function (x, i, a) { return a.indexOf(x) === i; });
+    // v0.6.31 **独立词排除**（按关键词绑定）：{ keyword: [排除词...] }——
+    // 关键词必须**独立出现**：排除词内部的该关键词不算命中（如关键词
+    // string + 排除词 substring → substring 里的 string 不算；标题别处
+    // 独立的 string 仍算命中）。只对绑定的关键词生效，其他关键词不受影响。
+    var kwe = {};
+    if (t.kwExclusions && typeof t.kwExclusions === 'object') {
+      Object.keys(t.kwExclusions).forEach(function (kw) {
+        var arr = Array.isArray(t.kwExclusions[kw]) ? t.kwExclusions[kw] : [];
+        arr = arr.map(function (x) { return String(x).trim(); }).filter(Boolean);
+        arr = arr.filter(function (x, i, a) { return a.indexOf(x) === i; });
+        if (arr.length) kwe[kw] = arr;
+      });
+    }
     // v0.5.6 第四轮：banner（角色主页背景图）/ featured（代表作 videoId）随角色持久化
     // v0.5.6 第十轮：featuredMeta（代表作视频快照，marquee 卡数据源）
     // v0.5.6 第二十轮需求 4：**多个代表作**——featured 由单值改数组，
@@ -1147,7 +1162,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       name: name,
       icon: String(t.icon || ''),
       keywords: kws,
-      exclusions: excls,
+      globalExclusions: gexcls,
+      kwExclusions: kwe,
       banner: String(t.banner || ''),
       featured: fds,
       featuredMetas: fms,
@@ -1336,7 +1352,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
             name: c.name,
             icon: c.icon || '',
             keywords: (c.keywords || []).slice(),
-            exclusions: (c.exclusions || []).slice(),
+            // v0.6.31：全局排除词 + 独立词排除（按关键词绑定）随合并条目输出
+            globalExclusions: (c.globalExclusions || []).slice(),
+            kwExclusions: c.kwExclusions && typeof c.kwExclusions === 'object'
+              ? Object.assign({}, c.kwExclusions) : {},
             banner: c.banner || '',
             featured: (c.featured || []).slice(),
             featuredMetas: c.featuredMetas ? Object.assign({}, c.featuredMetas) : {},
@@ -1352,10 +1371,22 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
               if (k && m.keywords.indexOf(k) < 0) m.keywords.push(k);
             });
           }
-          // v0.5.9：排除词并集（跨源同名角色合并——任一源排除词都生效）
-          if (c.exclusions && c.exclusions.length) {
-            c.exclusions.forEach(function (x) {
-              if (x && m.exclusions.indexOf(x) < 0) m.exclusions.push(x);
+          // v0.6.31 全局排除词并集（原 v0.5.9 排除词——跨源同名角色合并，
+          // 任一源排除词都生效）
+          if (c.globalExclusions && c.globalExclusions.length) {
+            c.globalExclusions.forEach(function (x) {
+              if (x && m.globalExclusions.indexOf(x) < 0) m.globalExclusions.push(x);
+            });
+          }
+          // v0.6.31 独立词排除并集（同名角色同一关键词的独立词排除合并）
+          if (c.kwExclusions && typeof c.kwExclusions === 'object') {
+            Object.keys(c.kwExclusions).forEach(function (kw) {
+              var arr = c.kwExclusions[kw] || [];
+              if (!arr.length) return;
+              var mArr = m.kwExclusions[kw] || (m.kwExclusions[kw] = []);
+              arr.forEach(function (x) {
+                if (x && mArr.indexOf(x) < 0) mArr.push(x);
+              });
             });
           }
           // featured 并集（跨源代表作聚合）
@@ -1638,6 +1669,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         c.keywords = arr.map(function (k) { return String(k).trim(); })
           .filter(Boolean)
           .filter(function (k, i, a) { return a.indexOf(k) === i; });
+        // v0.6.31：被删除关键词的独立词排除一并清理
+        if (c.kwExclusions && typeof c.kwExclusions === 'object') {
+          Object.keys(c.kwExclusions).forEach(function (kw) {
+            if (c.keywords.indexOf(kw) < 0) delete c.kwExclusions[kw];
+          });
+        }
         found = true;
       }
     });
@@ -1645,9 +1682,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     return found;
   }
 
-  /** 排除词：setExclusions(name, [excl,...])（trim+去重；v0.5.9——
-   *  标题含任一排除词 → 视频墙/角色页匹配不命中） */
-  function setExclusions(name, excls) {
+  /** 全局排除词：setGlobalExclusions(name, [excl,...])（trim+去重；v0.5.9
+   *  排除词 → v0.6.31 显式改名全局排除词——标题含任一 → 视频墙/角色页
+   *  匹配整段失败。setExclusions 保留为兼容别名）。 */
+  function setGlobalExclusions(name, excls) {
     var sid = srcOfRole(name);
     if (!sid) return false;
     var d = dataOf(sid);
@@ -1655,7 +1693,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     d.chars.forEach(function (c) {
       if (c.name === name) {
         var arr = Array.isArray(excls) ? excls : [];
-        c.exclusions = arr.map(function (x) { return String(x).trim(); })
+        c.globalExclusions = arr.map(function (x) { return String(x).trim(); })
           .filter(Boolean)
           .filter(function (x, i, a) { return a.indexOf(x) === i; });
         found = true;
@@ -1663,6 +1701,74 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     });
     if (found) { persistSrcData(sid, d); notify(); }
     return found;
+  }
+  /** v0.5.9 旧名兼容别名 */
+  function setExclusions(name, excls) { return setGlobalExclusions(name, excls); }
+
+  /** v0.6.31 **独立词排除**：setKeywordExclusions(name, keyword, [excl,...])——
+   *  该关键词必须独立出现（排除词内部的该关键词不算命中），只影响绑定的
+   *  关键词。list 为空数组 → 解除该关键词的独立词排除。 */
+  function setKeywordExclusions(name, keyword, list) {
+    var sid = srcOfRole(name);
+    if (!sid) return false;
+    var d = dataOf(sid);
+    var found = false;
+    d.chars.forEach(function (c) {
+      if (c.name === name) {
+        var kw = String(keyword || '').trim();
+        if (!kw) return;
+        var arr = Array.isArray(list) ? list : [];
+        arr = arr.map(function (x) { return String(x).trim(); })
+          .filter(Boolean)
+          .filter(function (x, i, a) { return a.indexOf(x) === i; });
+        if (!c.kwExclusions || typeof c.kwExclusions !== 'object') c.kwExclusions = {};
+        if (arr.length) c.kwExclusions[kw] = arr;
+        else delete c.kwExclusions[kw];
+        found = true;
+      }
+    });
+    if (found) { persistSrcData(sid, d); notify(); }
+    return found;
+  }
+
+  /** v0.6.31 **独立词命中**（导出供角色页等复用）：标题含关键词且**至少
+   *  一次出现**不被任一独立词排除区间覆盖 → true。
+   *  lowTitle 已小写；lowKw 已小写；kwExcls = [排除词,...]（原始大小写）。
+   *  例：关键词 string、排除词 substring——标题仅「substring」→ string
+   *  的出现 [0,6) 被 [0,9) 覆盖 → false；标题「abc string def」→ 独立
+   *  出现 → true；标题「substring string」→ 有一次独立 → true。 */
+  function kwHitTitle(lowTitle, lowKw, kwExcls) {
+    if (!lowKw || !lowTitle || lowTitle.indexOf(lowKw) < 0) return false;
+    if (!kwExcls || !kwExcls.length) return true;
+    // 关键词全部出现区间（允许重叠：aa 在 aaa 中出现 2 次）
+    var kwSpans = [];
+    var p = 0;
+    while (true) {
+      var i = lowTitle.indexOf(lowKw, p);
+      if (i < 0) break;
+      kwSpans.push([i, i + lowKw.length]);
+      p = i + 1;
+    }
+    if (!kwSpans.length) return false;
+    // 全部排除词的区间
+    var exSpans = [];
+    kwExcls.forEach(function (e) {
+      var le = String(e).toLowerCase();
+      if (!le) return;
+      var q = 0;
+      while (true) {
+        var j = lowTitle.indexOf(le, q);
+        if (j < 0) break;
+        exSpans.push([j, j + le.length]);
+        q = j + 1;
+      }
+    });
+    // 关键词至少一次出现不被任一排除词区间覆盖
+    return kwSpans.some(function (sp) {
+      return !exSpans.some(function (ex) {
+        return ex[0] <= sp[0] && ex[1] >= sp[1];
+      });
+    });
   }
 
   /** 标题关键词匹配（按源）：返回命中的角色对象数组（列表顺序；一个角色只算一次） */
@@ -1675,18 +1781,23 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var low = String(title).toLowerCase();
     var out = [];
     d.chars.forEach(function (c) {
-      var hit = c.keywords.some(function (k) {
-        return k && low.indexOf(String(k).toLowerCase()) >= 0;
+      var hit = false;
+      (c.keywords || []).forEach(function (k) {
+        if (!k) return;
+        // v0.6.31 独立词排除：该关键词必须独立出现（排除词内部不算）
+        var kwe = (c.kwExclusions && c.kwExclusions[k]) || null;
+        if (kwHitTitle(low, String(k).toLowerCase(), kwe)) hit = true;
       });
-      // v0.5.9：排除词——关键词命中但标题含任一排除词 → 不命中
-      if (hit && (c.exclusions || []).some(function (x) {
+      // v0.6.31 全局排除词（原 v0.5.9 exclusions）——标题含任一 → 整段失败
+      if (hit && (c.globalExclusions || []).some(function (x) {
         return x && low.indexOf(String(x).toLowerCase()) >= 0;
       })) hit = false;
       if (hit) out.push({
         name: c.name,
         icon: c.icon,
         keywords: c.keywords.slice(),
-        exclusions: (c.exclusions || []).slice(),
+        globalExclusions: (c.globalExclusions || []).slice(),
+        kwExclusions: c.kwExclusions ? Object.assign({}, c.kwExclusions) : {},
       });
     });
     return out;
@@ -1782,7 +1893,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       banner: srcChar ? srcChar.banner || '' : '',
       keywords: srcChar && srcChar.keywords && srcChar.keywords.length
         ? srcChar.keywords.slice() : [name],
-      exclusions: srcChar && srcChar.exclusions ? srcChar.exclusions.slice() : [],
+      // v0.6.31：副本同样复制全局排除词 + 独立词排除（跨源匹配语义一致）
+      globalExclusions: srcChar && srcChar.globalExclusions
+        ? srcChar.globalExclusions.slice() : [],
+      kwExclusions: srcChar && srcChar.kwExclusions && typeof srcChar.kwExclusions === 'object'
+        ? Object.assign({}, srcChar.kwExclusions) : {},
     });
   }
 
@@ -2109,7 +2224,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     setFeatured: setFeatured,             // v0.5.6 第四轮：代表作 videoId
     featuredOf: featuredOf,               // v0.5.6 第十九轮：全局代表作圆点
     setKeywords: setKeywords,
-    setExclusions: setExclusions,       // v0.5.9：排除词（标题命中即不匹配）
+    setExclusions: setExclusions,       // v0.5.9 旧名别名 → setGlobalExclusions
+    setGlobalExclusions: setGlobalExclusions,     // v0.6.31：全局排除词
+    setKeywordExclusions: setKeywordExclusions,   // v0.6.31：独立词排除（按关键词绑定）
+    kwHitTitle: kwHitTitle,             // v0.6.31：独立词命中判定（导出供角色页等复用）
     rename: rename,                     // v0.5.9：角色改名（全关联迁移）
     matchTitle: matchTitle,
     getChar: getChar,                     // v0.6.30：返回角色名**数组**
@@ -6480,6 +6598,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     function renderKws() {
       kwLine.innerHTML = '';
       (r.keywords || []).forEach(function (k) {
+        var item = V.utils.el('div', { className: 'vshell-char-kwitem' });
         var chip = V.utils.el('span', {
           className: 'vshell-char-kwchip',
           title: '关键词',
@@ -6498,8 +6617,28 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
               removeKw(k);
             },
           }, V.utils.el('span', { className: 'codicon codicon-close' })),
+          // v0.6.31：独立词排除编辑入口（该关键词必须独立出现）
+          V.utils.el('button', {
+            className: 'vshell-char-kwex-edit',
+            type: 'button',
+            title: '编辑独立词排除（关键词 ' + k + '）',
+            'aria-label': '编辑独立词排除 ' + k,
+            onclick: function (e) {
+              e.stopPropagation();
+              editKwExcls(k);
+            },
+          }, V.utils.el('span', { className: 'codicon codicon-edit' })),
         ]);
-        kwLine.appendChild(chip);
+        item.appendChild(chip);
+        // v0.6.31：独立词排除小字（有才显示）
+        var kwe = (r.kwExclusions && r.kwExclusions[k]) || [];
+        if (kwe.length) {
+          item.appendChild(V.utils.el('div', {
+            className: 'vshell-char-kwexline',
+            title: '独立词排除：这些词内部的 ' + k + ' 不算命中',
+          }, '排除: ' + kwe.join('、')));
+        }
+        kwLine.appendChild(item);
       });
     }
     function removeKw(k) {
@@ -6508,6 +6647,98 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       renderKws();
     }
     renderKws();
+
+    /** v0.6.31：独立词排除编辑弹窗（关键词 kw）——标题中 kw 出现在这些
+     *  词内部时不匹配（只影响该关键词；其他关键词照常包含匹配）。 */
+    function editKwExcls(kw) {
+      var cur = (r.kwExclusions && r.kwExclusions[kw]) || [];
+      var overlay = V.utils.el('div', {
+        className: 'vshell-modal-backdrop vshell-picker-backdrop',
+      });
+      var box = V.utils.el('div', {
+        className: 'vshell-modal vshell-tag-modal vshell-char-kwex-modal',
+      }, [
+        V.utils.el('div', { className: 'vshell-modal-title-row' }, [
+          V.utils.el('div', { className: 'vshell-modal-title' }, '独立词排除 · ' + kw),
+        ]),
+        V.utils.el('div', { className: 'vshell-modal-sub' },
+          '标题中「' + kw + '」出现在这些词内部时不匹配（如关键词 string、排除词 substring）；' +
+          '标题别处独立出现「' + kw + '」仍算命中。'),
+      ]);
+      var listEl = V.utils.el('div', { className: 'vshell-char-kwex-list' });
+      box.appendChild(listEl);
+      function render() {
+        listEl.innerHTML = '';
+        cur.forEach(function (x) {
+          var chip = V.utils.el('span', { className: 'vshell-char-kwchip' }, [
+            V.utils.el('span', { className: 'vshell-char-kwchip-name' }, x),
+            V.utils.el('button', {
+              className: 'vshell-st-chip-del',
+              type: 'button',
+              title: '删除独立词排除',
+              'aria-label': '删除独立词排除 ' + x,
+              onclick: function (e) {
+                e.stopPropagation();
+                cur = cur.filter(function (v) { return v !== x; });
+                render();
+              },
+            }, V.utils.el('span', { className: 'codicon codicon-close' })),
+          ]);
+          listEl.appendChild(chip);
+        });
+      }
+      render();
+      // 添加行
+      var addRow = V.utils.el('div', { className: 'vshell-char-kwadd' });
+      var inEl = V.utils.el('input', {
+        className: 'vshell-tag-input',
+        type: 'text',
+        placeholder: '添加独立词排除…',
+        'aria-label': '添加独立词排除',
+        onkeydown: function (e) {
+          if (e.key === 'Enter') { e.preventDefault(); doAdd(); }
+        },
+      });
+      function doAdd() {
+        var v = inEl.value.trim();
+        if (!v) return;
+        if (cur.indexOf(v) < 0) cur.push(v);
+        inEl.value = '';
+        render();
+      }
+      addRow.appendChild(inEl);
+      addRow.appendChild(V.utils.el('button', {
+        className: 'vshell-tag-add',
+        type: 'button',
+        title: '添加独立词排除',
+        'aria-label': '添加独立词排除',
+        onclick: doAdd,
+      }, V.utils.el('span', { className: 'codicon codicon-add' })));
+      box.appendChild(addRow);
+      // 底部：取消 / 保存
+      var foot = V.utils.el('div', { className: 'vshell-tag-foot' });
+      foot.appendChild(V.utils.el('button', {
+        className: 'vshell-btn vshell-btn-secondary',
+        onclick: close,
+      }, '取消'));
+      foot.appendChild(V.utils.el('button', {
+        className: 'vshell-btn vshell-btn-primary',
+        onclick: function () {
+          V.characters.setKeywordExclusions(r.name, kw, cur);
+          close();
+          renderKws();
+        },
+      }, '保存'));
+      box.appendChild(foot);
+      function close() {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      }
+      overlay.appendChild(box);
+      overlay.addEventListener('mousedown', function (e) {
+        if (e.target === overlay) close();
+      });
+      document.body.appendChild(overlay);
+    }
 
     // 添加关键词行
     var kwAdd = V.utils.el('div', { className: 'vshell-char-kwadd' });
@@ -6542,25 +6773,26 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       renderKws();
     }
 
-    // 排除词区（v0.5.9：标题含任一排除词 → 视频墙/角色页匹配不命中）
+    // 全局排除词区（v0.5.9 排除词 → v0.6.31 显式改名：标题含任一全局排除
+    // 词 → 视频墙/角色页匹配整段失败；独立词排除在关键词 chip 的编辑入口）
     mainBox.appendChild(V.utils.el('div', { className: 'vshell-char-sec' }, [
-      V.utils.el('div', { className: 'vshell-char-sec-title' }, '排除词'),
+      V.utils.el('div', { className: 'vshell-char-sec-title' }, '全局排除词'),
       V.utils.el('div', { className: 'vshell-char-exline' }),
     ]));
     var exLine = mainBox.querySelector('.vshell-char-exline');
     function renderExcls() {
       exLine.innerHTML = '';
-      (r.exclusions || []).forEach(function (x) {
+      (r.globalExclusions || []).forEach(function (x) {
         var chip = V.utils.el('span', {
           className: 'vshell-char-kwchip',
-          title: '排除词',
+          title: '全局排除词',
         }, [
           V.utils.el('span', { className: 'vshell-char-kwchip-name' }, x),
           V.utils.el('button', {
             className: 'vshell-st-chip-del',
             type: 'button',
-            title: '删除排除词',
-            'aria-label': '删除排除词 ' + x,
+            title: '删除全局排除词',
+            'aria-label': '删除全局排除词 ' + x,
             onclick: function (e) {
               e.stopPropagation();
               removeExcl(x);
@@ -6571,19 +6803,19 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       });
     }
     function removeExcl(x) {
-      var excls = (r.exclusions || []).filter(function (v) { return v !== x; });
-      V.characters.setExclusions(r.name, excls);
+      var excls = (r.globalExclusions || []).filter(function (v) { return v !== x; });
+      V.characters.setGlobalExclusions(r.name, excls);
       renderExcls();
     }
     renderExcls();
 
-    // 添加排除词行
+    // 添加全局排除词行
     var exAdd = V.utils.el('div', { className: 'vshell-char-kwadd' });
     var exInputEl = V.utils.el('input', {
       className: 'vshell-tag-input',
       type: 'text',
-      placeholder: '添加排除词…',
-      'aria-label': '添加排除词',
+      placeholder: '添加全局排除词…',
+      'aria-label': '添加全局排除词',
       onkeydown: function (e) {
         if (e.key === 'Enter') { e.preventDefault(); doAddExcl(); }
       },
@@ -6591,8 +6823,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var exAddBtn = V.utils.el('button', {
       className: 'vshell-tag-add',
       type: 'button',
-      title: '添加排除词',
-      'aria-label': '添加排除词',
+      title: '添加全局排除词',
+      'aria-label': '添加全局排除词',
       onclick: doAddExcl,
     }, V.utils.el('span', { className: 'codicon codicon-add' }));
     exAdd.appendChild(exInputEl);
@@ -6602,9 +6834,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     function doAddExcl() {
       var v = exInputEl.value.trim();
       if (!v) return;
-      var excls = (r.exclusions || []).slice();
+      var excls = (r.globalExclusions || []).slice();
       if (excls.indexOf(v) < 0) excls.push(v);
-      V.characters.setExclusions(r.name, excls);
+      V.characters.setGlobalExclusions(r.name, excls);
       exInputEl.value = '';
       renderExcls();
     }
@@ -17246,15 +17478,23 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
      *  v0.5.6 第五轮：结果再按关键词**精确过滤**（用户需求 3）——bilibili
      *  搜索是模糊匹配（标题/简介/标签），角色主页要求精确：标题必须包含
      *  角色的任一关键词，否则剔除（手动添加的视频不走聚合，不受影响） */
+    /** 关键词命中（v0.6.31 独立词语义）：标题含关键词且**至少一次出现**
+     *  不被该关键词的独立词排除覆盖；无独立词排除时退化为包含判断。 */
     function kwHit(title, kws) {
       if (!title) return false;
       var low = String(title).toLowerCase();
+      var kweMap = (role && role.kwExclusions) || {};
       return kws.some(function (k) {
-        return k && low.indexOf(String(k).toLowerCase()) >= 0;
+        if (!k) return false;
+        var lk = String(k).toLowerCase();
+        var kwe = kweMap[k] || null;
+        return V.characters && V.characters.kwHitTitle
+          ? V.characters.kwHitTitle(low, lk, kwe)
+          : low.indexOf(lk) >= 0;
       });
     }
 
-    /** v0.5.9：排除词命中——标题含任一排除词 → true（聚合/本地都要剔除） */
+    /** v0.6.31 全局排除词命中——标题含任一全局排除词 → true（聚合/本地都要剔除） */
     function exclHit(title, excls) {
       if (!title || !excls || !excls.length) return false;
       var low = String(title).toLowerCase();
@@ -17288,10 +17528,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
               }).then(function (res) {
                 if (!res) return null;   // 失败/未就绪 → null（可重试），不落坏缓存
                 var kwsNow = aggKws();
-                // v0.5.9：排除词——标题含任一排除词的视频不进角色页
+                // v0.5.9：全局排除词——标题含任一全局排除词的视频不进角色页
                 res.items = (res.items || []).filter(function (it) {
                   return it && it.id && kwHit(it.title, kwsNow)
-                    && !exclHit(it.title, role.exclusions);
+                    && !exclHit(it.title, role.globalExclusions);
                 });
                 return res;
               }).catch(function () { return null; });
@@ -17301,8 +17541,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
               // v0.5.10：排除词过滤放进 opts.filter——source-feed 的 filter
               // 在网络拉取（pullOne）与缓存加载（loadCache）两路都会执行；
               // 否则加排除词后已缓存（关键词命中但含排除词）的视频仍会显示。
-              // v0.6.30：排除词用**合并条目**（多源同名角色排除词并集）
-              var excls = role.exclusions;
+              // v0.6.30：全局排除词用**合并条目**（多源同名角色排除词并集）
+              var excls = role.globalExclusions;
               if (excls && excls.length) {
                 out = out.filter(function (it) {
                   return !exclHit(it.title, excls);
@@ -17408,7 +17648,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       (list || []).forEach(function (lv) {
         if (!lv || !lv.id) return;
         if (!kwHit(lv.title, kws)) return;
-        if (exclHit(lv.title, role.exclusions)) return;   // v0.5.9 排除词
+        if (exclHit(lv.title, role.globalExclusions)) return;   // v0.5.9 全局排除词
         if (!lv.sourceId) lv.sourceId = 'local';   // 归属标注（详情路由）
         agg.localItems.push(lv);
       });
@@ -23377,6 +23617,56 @@ html.vshell::-webkit-scrollbar {
   width: 28px;
   height: 28px;
   flex: none;
+}
+/* v0.6.31：独立词排除——关键词条目（chip + 独立排除小字）+ 编辑钮 +
+ * 编辑弹窗。编辑钮与删除钮同款：默认隐藏、悬停 chip 浮现 */
+.vshell-char-kwitem {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.vshell-char-kwex-edit {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 80ms;
+}
+.vshell-char-kwex-edit .codicon {
+  font-size: 11px;
+}
+.vshell .vshell-char-kwchip:hover .vshell-char-kwex-edit,
+.vshell .vshell-char-kwchip .vshell-char-kwex-edit:focus-visible {
+  opacity: 1;
+}
+.vshell-char-kwex-edit:hover {
+  color: var(--vscode-foreground);
+}
+.vshell-char-kwexline {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  padding-left: 10px;
+  line-height: 1.4;
+}
+.vshell-char-kwex-modal {
+  width: 380px;
+  max-width: 86vw;
+  padding: 16px;
+}
+.vshell-char-kwex-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 4px;
+  min-height: 24px;
 }
 .vshell-char-actions {
   display: flex;

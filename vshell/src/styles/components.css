@@ -3189,6 +3189,56 @@
   height: 28px;
   flex: none;
 }
+/* v0.6.31：独立词排除——关键词条目（chip + 独立排除小字）+ 编辑钮 +
+ * 编辑弹窗。编辑钮与删除钮同款：默认隐藏、悬停 chip 浮现 */
+.vshell-char-kwitem {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.vshell-char-kwex-edit {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 80ms;
+}
+.vshell-char-kwex-edit .codicon {
+  font-size: 11px;
+}
+.vshell .vshell-char-kwchip:hover .vshell-char-kwex-edit,
+.vshell .vshell-char-kwchip .vshell-char-kwex-edit:focus-visible {
+  opacity: 1;
+}
+.vshell-char-kwex-edit:hover {
+  color: var(--vscode-foreground);
+}
+.vshell-char-kwexline {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  padding-left: 10px;
+  line-height: 1.4;
+}
+.vshell-char-kwex-modal {
+  width: 380px;
+  max-width: 86vw;
+  padding: 16px;
+}
+.vshell-char-kwex-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 4px;
+  min-height: 24px;
+}
 .vshell-char-actions {
   display: flex;
   gap: 8px;
