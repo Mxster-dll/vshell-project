@@ -414,6 +414,12 @@
   function cleanInactive() {
     load();
     var active = activeSrcSet();
+    // v0.6.51：active 只有 local（冷启动隐私清洗把全部源剔除）时跳过——
+    // 否则会把所有 auto 组成员过滤掉、空组全删（曾误删 59 个自动组；
+    // 冷启动 privacy 语义是「不挂载」，不是「删除用户聚合数据」）
+    var hasReal = false;
+    for (var k in active) { if (k !== 'local') { hasReal = true; break; } }
+    if (!hasReal) return false;
     var changed = false;
     Object.keys(map.groups).forEach(function (g) {
       var gd = map.groups[g];
@@ -474,6 +480,9 @@
         var gs = map.groups;
         for (var g in gs) {                                    // 视频 vs 组内成员
           var gd = gs[g];
+          // v0.6.51：自动扫描只并入自动组——手动组是用户精心挑选的，
+          // 不能自动灌入相似封面视频（曾致手动组「不再是当初添加的视频」）
+          if (gd.auto === false) continue;
           if (gd.repPhash && phashInfoValid(gd.repPhash) && hamming(h, gd.repPhash) <= PHASH_DIST) {
             addToGroup(g, { src: srcId, id: item.id });
             return;

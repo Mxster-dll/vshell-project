@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.50
+// @version      0.6.51
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.50';
+window.VShell.version = '0.6.51';
 
 /* vshell 入口见 src/app.js */
 
@@ -5252,6 +5252,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   function cleanInactive() {
     load();
     var active = activeSrcSet();
+    // v0.6.51：active 只有 local（冷启动隐私清洗把全部源剔除）时跳过——
+    // 否则会把所有 auto 组成员过滤掉、空组全删（曾误删 59 个自动组；
+    // 冷启动 privacy 语义是「不挂载」，不是「删除用户聚合数据」）
+    var hasReal = false;
+    for (var k in active) { if (k !== 'local') { hasReal = true; break; } }
+    if (!hasReal) return false;
     var changed = false;
     Object.keys(map.groups).forEach(function (g) {
       var gd = map.groups[g];
@@ -5312,6 +5318,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         var gs = map.groups;
         for (var g in gs) {                                    // 视频 vs 组内成员
           var gd = gs[g];
+          // v0.6.51：自动扫描只并入自动组——手动组是用户精心挑选的，
+          // 不能自动灌入相似封面视频（曾致手动组「不再是当初添加的视频」）
+          if (gd.auto === false) continue;
           if (gd.repPhash && phashInfoValid(gd.repPhash) && hamming(h, gd.repPhash) <= PHASH_DIST) {
             addToGroup(g, { src: srcId, id: item.id });
             return;
