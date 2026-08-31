@@ -71,6 +71,20 @@
     return cropToRect(img, sx, sy, sw, sh, outW, outH, '#000');
   }
 
+  /** v0.6.56：原图**等比缩小**（不裁切，保留全部信息）→ dataURL。
+   *  背景图改为存原图缩小版 + 焦点坐标（bannerFocus）——渲染时由
+   *  role.js 用「焦点最大矩形 + 视差水平余量」实时计算显示区域。 */
+  function scaleImageToMax(img, maxSide, mime, quality) {
+    var iw = img.naturalWidth || img.width;
+    var ih = img.naturalHeight || img.height;
+    var s = Math.min(1, maxSide / Math.max(iw, ih));
+    var w = Math.round(iw * s), h = Math.round(ih * s);
+    var c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(img, 0, 0, w, h);
+    return c.toDataURL(mime || 'image/jpeg', quality == null ? 0.85 : quality);
+  }
+
   /** 点击"设置头像"→ 本地文件选择器 → 读取原图 → 裁剪界面 */
   function pickIcon(role, onSaved) {
     var input = V.utils.el('input', {
@@ -124,7 +138,7 @@
     var box = V.utils.el('div', { className: 'vshell-modal vshell-tag-crop-box vshell-bannerpick-box' });
     box.appendChild(V.utils.el('div', { className: 'vshell-modal-title' }, '设置背景图'));
     box.appendChild(V.utils.el('div', { className: 'vshell-modal-sub' },
-      '点击图片指定中心点——显示时该点始终居中，图片缩放覆盖全部区域（不裁剪）'));
+      '点击图片指定中心点——显示时该点始终居中，以焦点为中心取最大显示区域（视差水平留余量）'));
 
     var vp = V.utils.el('div', { className: 'vshell-bannerpick-vp' });
     var imgEl = V.utils.el('img', { alt: '', draggable: 'false', src: img.src });
@@ -193,8 +207,14 @@
       try {
         var iw = img.naturalWidth || img.width;
         var ih = img.naturalHeight || img.height;
-        var bannerUrl = cropAtCenter(img, cx * iw, cy * ih, 1280, 720);
+        // v0.6.56：不再裁 1280×720——存原图等比缩小版（最长边 1920，保留
+        // 全部信息）+ 焦点坐标；渲染时 role.js 用「焦点最大矩形 + 视差水平
+        // 余量」实时计算（中心点任意位置都能真正居中，显示区域最大）
+        var bannerUrl = scaleImageToMax(img, 1920, 'image/jpeg', 0.85);
         V.characters.setBanner(role.name, bannerUrl);
+        if (typeof V.characters.setBannerFocus === 'function') {
+          V.characters.setBannerFocus(role.name, cx, cy);
+        }
         overlay.remove();
         V.toast.ok('背景图已设置：' + role.name);
         if (onSaved) onSaved(bannerUrl);

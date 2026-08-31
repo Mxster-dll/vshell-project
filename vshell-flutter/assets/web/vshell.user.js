@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.55
+// @version      0.6.56
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.55';
+window.VShell.version = '0.6.56';
 
 /* vshell 入口见 src/app.js */
 
@@ -1165,6 +1165,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       globalExclusions: gexcls,
       kwExclusions: kwe,
       banner: String(t.banner || ''),
+      // v0.6.56：背景图焦点（原图归一化 0-1；渲染时以焦点为中心的最大
+      // 内接矩形 + 视差水平余量）——缺省 null = 图片中心
+      bannerFocus: (t && t.bannerFocus && typeof t.bannerFocus === 'object'
+        && typeof t.bannerFocus.cx === 'number' && typeof t.bannerFocus.cy === 'number')
+        ? { cx: t.bannerFocus.cx, cy: t.bannerFocus.cy } : null,
       featured: fds,
       featuredMetas: fms,
     };
@@ -1357,6 +1362,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
             kwExclusions: c.kwExclusions && typeof c.kwExclusions === 'object'
               ? Object.assign({}, c.kwExclusions) : {},
             banner: c.banner || '',
+            // v0.6.56：bannerFocus 跟随 banner（首源即有 banner 的焦点）
+            bannerFocus: c.bannerFocus || null,
             featured: (c.featured || []).slice(),
             featuredMetas: c.featuredMetas ? Object.assign({}, c.featuredMetas) : {},
             __srcs: [id],
@@ -1365,7 +1372,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         } else {
           var m = byName[c.name];
           if (!m.icon && c.icon) m.icon = c.icon;
-          if (!m.banner && c.banner) m.banner = c.banner;
+          if (!m.banner && c.banner) { m.banner = c.banner; m.bannerFocus = c.bannerFocus || null; }
           if (c.keywords && c.keywords.length) {
             c.keywords.forEach(function (k) {
               if (k && m.keywords.indexOf(k) < 0) m.keywords.push(k);
@@ -1596,6 +1603,22 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var found = false;
     d.chars.forEach(function (c) {
       if (c.name === name) { c.banner = String(url || '').trim(); found = true; }
+    });
+    if (found) { persistSrcData(sid, d); notify(); }
+    return found;
+  }
+
+  /** v0.6.56：背景图焦点（原图归一化 0-1，与 setBanner 配套存）——渲染时
+   *  以焦点为中心取最大内接矩形 + 视差水平余量；空 cx/cy = 清空（图片中心） */
+  function setBannerFocus(name, cx, cy) {
+    var sid = srcOfRole(name);
+    if (!sid) return false;
+    var d = dataOf(sid);
+    var found = false;
+    var focus = (typeof cx === 'number' && typeof cy === 'number')
+      ? { cx: Math.max(0, Math.min(1, cx)), cy: Math.max(0, Math.min(1, cy)) } : null;
+    d.chars.forEach(function (c) {
+      if (c.name === name) { c.bannerFocus = focus; found = true; }
     });
     if (found) { persistSrcData(sid, d); notify(); }
     return found;
@@ -1965,6 +1988,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       name: name,
       icon: srcChar ? srcChar.icon || '' : '',
       banner: srcChar ? srcChar.banner || '' : '',
+      // v0.6.56：跨源副本焦点跟随（渲染用焦点最大矩形）
+      bannerFocus: srcChar && srcChar.bannerFocus ? {
+        cx: srcChar.bannerFocus.cx, cy: srcChar.bannerFocus.cy,
+      } : null,
       keywords: srcChar && srcChar.keywords && srcChar.keywords.length
         ? srcChar.keywords.slice() : [name],
       // v0.6.31：副本同样复制全局排除词 + 独立词排除（跨源匹配语义一致）
@@ -2295,6 +2322,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     clear: clear,
     setIcon: setIcon,
     setBanner: setBanner,                 // v0.5.6 第四轮：角色主页背景图
+    setBannerFocus: setBannerFocus,       // v0.6.56：背景图焦点（原图归一化）
     setFeatured: setFeatured,             // v0.5.6 第四轮：代表作 videoId
     featuredOf: featuredOf,               // v0.5.6 第十九轮：全局代表作圆点
     setKeywords: setKeywords,
@@ -2434,6 +2462,20 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     return cropToRect(img, sx, sy, sw, sh, outW, outH, '#000');
   }
 
+  /** v0.6.56：原图**等比缩小**（不裁切，保留全部信息）→ dataURL。
+   *  背景图改为存原图缩小版 + 焦点坐标（bannerFocus）——渲染时由
+   *  role.js 用「焦点最大矩形 + 视差水平余量」实时计算显示区域。 */
+  function scaleImageToMax(img, maxSide, mime, quality) {
+    var iw = img.naturalWidth || img.width;
+    var ih = img.naturalHeight || img.height;
+    var s = Math.min(1, maxSide / Math.max(iw, ih));
+    var w = Math.round(iw * s), h = Math.round(ih * s);
+    var c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(img, 0, 0, w, h);
+    return c.toDataURL(mime || 'image/jpeg', quality == null ? 0.85 : quality);
+  }
+
   /** 点击"设置头像"→ 本地文件选择器 → 读取原图 → 裁剪界面 */
   function pickIcon(role, onSaved) {
     var input = V.utils.el('input', {
@@ -2487,7 +2529,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var box = V.utils.el('div', { className: 'vshell-modal vshell-tag-crop-box vshell-bannerpick-box' });
     box.appendChild(V.utils.el('div', { className: 'vshell-modal-title' }, '设置背景图'));
     box.appendChild(V.utils.el('div', { className: 'vshell-modal-sub' },
-      '点击图片指定中心点——显示时该点始终居中，图片缩放覆盖全部区域（不裁剪）'));
+      '点击图片指定中心点——显示时该点始终居中，以焦点为中心取最大显示区域（视差水平留余量）'));
 
     var vp = V.utils.el('div', { className: 'vshell-bannerpick-vp' });
     var imgEl = V.utils.el('img', { alt: '', draggable: 'false', src: img.src });
@@ -2556,8 +2598,14 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       try {
         var iw = img.naturalWidth || img.width;
         var ih = img.naturalHeight || img.height;
-        var bannerUrl = cropAtCenter(img, cx * iw, cy * ih, 1280, 720);
+        // v0.6.56：不再裁 1280×720——存原图等比缩小版（最长边 1920，保留
+        // 全部信息）+ 焦点坐标；渲染时 role.js 用「焦点最大矩形 + 视差水平
+        // 余量」实时计算（中心点任意位置都能真正居中，显示区域最大）
+        var bannerUrl = scaleImageToMax(img, 1920, 'image/jpeg', 0.85);
         V.characters.setBanner(role.name, bannerUrl);
+        if (typeof V.characters.setBannerFocus === 'function') {
+          V.characters.setBannerFocus(role.name, cx, cy);
+        }
         overlay.remove();
         V.toast.ok('背景图已设置：' + role.name);
         if (onSaved) onSaved(bannerUrl);
@@ -17560,7 +17608,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       || (V.charBanners && V.charBanners.bannerFor(role.name));
     var banner = V.utils.el('div', { className: 'vshell-role-banner' });
 
-    /** 应用（或清除）背景图；局部更新，不重建 banner（编辑保存后回调用） */
+    /** 应用（或清除）背景图；局部更新，不重建 banner（编辑保存后回调用）。
+     *  v0.6.56：焦点最大矩形 + 视差水平余量——以用户选择的中心点（bannerFocus，
+     *  缺省图片中心）为焦点，取与卡片同比例的最大内接矩形铺满卡片；水平方向
+     *  额外保证至少 PARALLAX_MARGIN 余量供视差平移（图宽 ≥ 卡宽×(1+余量)）。 */
+    var PARALLAX_MARGIN = 0.2;   // 视差水平余量 20%（原 115% auto 的 15% 不够用）
     function applyBanner(url) {
       bannerUrl = url || '';
       banner.classList.toggle('has-bg', !!bannerUrl);
@@ -17568,23 +17620,52 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         // 背景图 + 暗色渐变遮罩（保证头像/文字可读）
         banner.style.backgroundImage = 'linear-gradient(180deg, rgba(0,0,0,0.45), rgba(0,0,0,0.82)), url("'
           + bannerUrl + '")';
-        // v0.5.6 第十一轮（用户需求 2）：视差需留平移余量——放大到 115%
-        // （cover 时正好铺满，平移会露边）
-        banner.style.backgroundSize = '115% auto';
+        banner.style.backgroundSize = 'cover';
         banner.style.backgroundPosition = 'center';
+        // 焦点几何需要图片尺寸——图加载完成后精算
+        var focus = (role && role.bannerFocus) || { cx: 0.5, cy: 0.5 };
+        var probe = new Image();
+        probe.onload = function () {
+          var W = banner.clientWidth, H = banner.clientHeight;
+          if (!W || !H) return;
+          var iw = probe.naturalWidth || 1, ih = probe.naturalHeight || 1;
+          var ar = W / H;
+          var fx = focus.cx * iw, fy = focus.cy * ih;
+          // 焦点最大矩形（内接、与卡片同比例；任一边碰图边即停）
+          var hw = Math.max(0.001, Math.min(fx, iw - fx, fy * ar, (ih - fy) * ar));
+          var rectScale = W / (2 * hw);
+          // 视差水平余量下限（图宽 ≥ 卡宽×(1+PARALLAX_MARGIN)）
+          var minScale = (1 + PARALLAX_MARGIN) * W / iw;
+          var scale = Math.max(rectScale, minScale);
+          var bw = iw * scale, bh = ih * scale;
+          var px = bw > W ? ((fx * scale - W / 2) / (bw - W)) * 100 : 50;
+          var py = bh > H ? ((fy * scale - H / 2) / (bh - H)) * 100 : 50;
+          banner.style.backgroundSize = bw + 'px ' + bh + 'px';
+          banner.style.backgroundPosition = px + '% ' + py + '%';
+          banner._bgPx = px; banner._bgPy = py;   // 视差基准（焦点居中位）
+        };
+        probe.src = bannerUrl;
         // v0.5.6 第十一轮（用户需求 2）：背景图随鼠标视差——放大留余量
         // （background-size 115%），mousemove 按指针相对位置平移背景，
         // mouseleave 复位到中心；has-bg 才有（渐变无图不视差）
         // v0.5.6 第十二轮（需求 6）：视差**仅水平**——竖直方向不动
+        // v0.6.56：视差基准 = 焦点居中 position（px），偏移 ±7% 并夹取 [0,100]
         if (!banner._parallaxOff) {
           var parallax = function (e) {
             var rect = banner.getBoundingClientRect();
             if (!rect.width || !rect.height) return;
             var nx = (e.clientX - rect.left) / rect.width - 0.5;   // -0.5..0.5
-            banner.style.backgroundPosition = (50 + nx * 14) + '% 50%';
+            var basePx = (typeof banner._bgPx === 'number') ? banner._bgPx : 50;
+            var basePy = (typeof banner._bgPy === 'number') ? banner._bgPy : 50;
+            var v = Math.min(100, Math.max(0, basePx + nx * 14));
+            banner.style.backgroundPosition = v + '% ' + basePy + '%';
           };
           var parallaxOff = function () {
-            banner.style.backgroundPosition = 'center';
+            if (typeof banner._bgPx === 'number' && typeof banner._bgPy === 'number') {
+              banner.style.backgroundPosition = banner._bgPx + '% ' + banner._bgPy + '%';
+            } else {
+              banner.style.backgroundPosition = 'center';
+            }
           };
           banner.addEventListener('mousemove', parallax);
           banner.addEventListener('mouseleave', parallaxOff);

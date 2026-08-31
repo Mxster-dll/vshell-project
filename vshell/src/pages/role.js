@@ -394,7 +394,11 @@
       || (V.charBanners && V.charBanners.bannerFor(role.name));
     var banner = V.utils.el('div', { className: 'vshell-role-banner' });
 
-    /** 应用（或清除）背景图；局部更新，不重建 banner（编辑保存后回调用） */
+    /** 应用（或清除）背景图；局部更新，不重建 banner（编辑保存后回调用）。
+     *  v0.6.56：焦点最大矩形 + 视差水平余量——以用户选择的中心点（bannerFocus，
+     *  缺省图片中心）为焦点，取与卡片同比例的最大内接矩形铺满卡片；水平方向
+     *  额外保证至少 PARALLAX_MARGIN 余量供视差平移（图宽 ≥ 卡宽×(1+余量)）。 */
+    var PARALLAX_MARGIN = 0.2;   // 视差水平余量 20%（原 115% auto 的 15% 不够用）
     function applyBanner(url) {
       bannerUrl = url || '';
       banner.classList.toggle('has-bg', !!bannerUrl);
@@ -402,23 +406,52 @@
         // 背景图 + 暗色渐变遮罩（保证头像/文字可读）
         banner.style.backgroundImage = 'linear-gradient(180deg, rgba(0,0,0,0.45), rgba(0,0,0,0.82)), url("'
           + bannerUrl + '")';
-        // v0.5.6 第十一轮（用户需求 2）：视差需留平移余量——放大到 115%
-        // （cover 时正好铺满，平移会露边）
-        banner.style.backgroundSize = '115% auto';
+        banner.style.backgroundSize = 'cover';
         banner.style.backgroundPosition = 'center';
+        // 焦点几何需要图片尺寸——图加载完成后精算
+        var focus = (role && role.bannerFocus) || { cx: 0.5, cy: 0.5 };
+        var probe = new Image();
+        probe.onload = function () {
+          var W = banner.clientWidth, H = banner.clientHeight;
+          if (!W || !H) return;
+          var iw = probe.naturalWidth || 1, ih = probe.naturalHeight || 1;
+          var ar = W / H;
+          var fx = focus.cx * iw, fy = focus.cy * ih;
+          // 焦点最大矩形（内接、与卡片同比例；任一边碰图边即停）
+          var hw = Math.max(0.001, Math.min(fx, iw - fx, fy * ar, (ih - fy) * ar));
+          var rectScale = W / (2 * hw);
+          // 视差水平余量下限（图宽 ≥ 卡宽×(1+PARALLAX_MARGIN)）
+          var minScale = (1 + PARALLAX_MARGIN) * W / iw;
+          var scale = Math.max(rectScale, minScale);
+          var bw = iw * scale, bh = ih * scale;
+          var px = bw > W ? ((fx * scale - W / 2) / (bw - W)) * 100 : 50;
+          var py = bh > H ? ((fy * scale - H / 2) / (bh - H)) * 100 : 50;
+          banner.style.backgroundSize = bw + 'px ' + bh + 'px';
+          banner.style.backgroundPosition = px + '% ' + py + '%';
+          banner._bgPx = px; banner._bgPy = py;   // 视差基准（焦点居中位）
+        };
+        probe.src = bannerUrl;
         // v0.5.6 第十一轮（用户需求 2）：背景图随鼠标视差——放大留余量
         // （background-size 115%），mousemove 按指针相对位置平移背景，
         // mouseleave 复位到中心；has-bg 才有（渐变无图不视差）
         // v0.5.6 第十二轮（需求 6）：视差**仅水平**——竖直方向不动
+        // v0.6.56：视差基准 = 焦点居中 position（px），偏移 ±7% 并夹取 [0,100]
         if (!banner._parallaxOff) {
           var parallax = function (e) {
             var rect = banner.getBoundingClientRect();
             if (!rect.width || !rect.height) return;
             var nx = (e.clientX - rect.left) / rect.width - 0.5;   // -0.5..0.5
-            banner.style.backgroundPosition = (50 + nx * 14) + '% 50%';
+            var basePx = (typeof banner._bgPx === 'number') ? banner._bgPx : 50;
+            var basePy = (typeof banner._bgPy === 'number') ? banner._bgPy : 50;
+            var v = Math.min(100, Math.max(0, basePx + nx * 14));
+            banner.style.backgroundPosition = v + '% ' + basePy + '%';
           };
           var parallaxOff = function () {
-            banner.style.backgroundPosition = 'center';
+            if (typeof banner._bgPx === 'number' && typeof banner._bgPy === 'number') {
+              banner.style.backgroundPosition = banner._bgPx + '% ' + banner._bgPy + '%';
+            } else {
+              banner.style.backgroundPosition = 'center';
+            }
           };
           banner.addEventListener('mousemove', parallax);
           banner.addEventListener('mouseleave', parallaxOff);

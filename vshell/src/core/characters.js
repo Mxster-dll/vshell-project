@@ -118,6 +118,11 @@
       globalExclusions: gexcls,
       kwExclusions: kwe,
       banner: String(t.banner || ''),
+      // v0.6.56：背景图焦点（原图归一化 0-1；渲染时以焦点为中心的最大
+      // 内接矩形 + 视差水平余量）——缺省 null = 图片中心
+      bannerFocus: (t && t.bannerFocus && typeof t.bannerFocus === 'object'
+        && typeof t.bannerFocus.cx === 'number' && typeof t.bannerFocus.cy === 'number')
+        ? { cx: t.bannerFocus.cx, cy: t.bannerFocus.cy } : null,
       featured: fds,
       featuredMetas: fms,
     };
@@ -310,6 +315,8 @@
             kwExclusions: c.kwExclusions && typeof c.kwExclusions === 'object'
               ? Object.assign({}, c.kwExclusions) : {},
             banner: c.banner || '',
+            // v0.6.56：bannerFocus 跟随 banner（首源即有 banner 的焦点）
+            bannerFocus: c.bannerFocus || null,
             featured: (c.featured || []).slice(),
             featuredMetas: c.featuredMetas ? Object.assign({}, c.featuredMetas) : {},
             __srcs: [id],
@@ -318,7 +325,7 @@
         } else {
           var m = byName[c.name];
           if (!m.icon && c.icon) m.icon = c.icon;
-          if (!m.banner && c.banner) m.banner = c.banner;
+          if (!m.banner && c.banner) { m.banner = c.banner; m.bannerFocus = c.bannerFocus || null; }
           if (c.keywords && c.keywords.length) {
             c.keywords.forEach(function (k) {
               if (k && m.keywords.indexOf(k) < 0) m.keywords.push(k);
@@ -549,6 +556,22 @@
     var found = false;
     d.chars.forEach(function (c) {
       if (c.name === name) { c.banner = String(url || '').trim(); found = true; }
+    });
+    if (found) { persistSrcData(sid, d); notify(); }
+    return found;
+  }
+
+  /** v0.6.56：背景图焦点（原图归一化 0-1，与 setBanner 配套存）——渲染时
+   *  以焦点为中心取最大内接矩形 + 视差水平余量；空 cx/cy = 清空（图片中心） */
+  function setBannerFocus(name, cx, cy) {
+    var sid = srcOfRole(name);
+    if (!sid) return false;
+    var d = dataOf(sid);
+    var found = false;
+    var focus = (typeof cx === 'number' && typeof cy === 'number')
+      ? { cx: Math.max(0, Math.min(1, cx)), cy: Math.max(0, Math.min(1, cy)) } : null;
+    d.chars.forEach(function (c) {
+      if (c.name === name) { c.bannerFocus = focus; found = true; }
     });
     if (found) { persistSrcData(sid, d); notify(); }
     return found;
@@ -918,6 +941,10 @@
       name: name,
       icon: srcChar ? srcChar.icon || '' : '',
       banner: srcChar ? srcChar.banner || '' : '',
+      // v0.6.56：跨源副本焦点跟随（渲染用焦点最大矩形）
+      bannerFocus: srcChar && srcChar.bannerFocus ? {
+        cx: srcChar.bannerFocus.cx, cy: srcChar.bannerFocus.cy,
+      } : null,
       keywords: srcChar && srcChar.keywords && srcChar.keywords.length
         ? srcChar.keywords.slice() : [name],
       // v0.6.31：副本同样复制全局排除词 + 独立词排除（跨源匹配语义一致）
@@ -1248,6 +1275,7 @@
     clear: clear,
     setIcon: setIcon,
     setBanner: setBanner,                 // v0.5.6 第四轮：角色主页背景图
+    setBannerFocus: setBannerFocus,       // v0.6.56：背景图焦点（原图归一化）
     setFeatured: setFeatured,             // v0.5.6 第四轮：代表作 videoId
     featuredOf: featuredOf,               // v0.5.6 第十九轮：全局代表作圆点
     setKeywords: setKeywords,
