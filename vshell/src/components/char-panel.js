@@ -536,9 +536,9 @@
       });
     }
     function removeKw(k) {
-      var kws = (r.keywords || []).filter(function (x) { return x !== k; });
-      V.characters.setKeywords(r.name, kws);
-      renderKws();
+      // v0.6.41：全源删除（跨源同名角色合并显示——旧 setKeywords 只写首个
+      // 源，残留源重合并回末尾，表现为「删除后词跑到最后」）
+      V.characters.removeKeyword(r.name, k);
     }
     renderKws();
 
@@ -655,10 +655,9 @@
     }
     function removeKwe(w, kws) {
       kws.forEach(function (kw) {
-        var list = (liveKwe()[kw] || []).filter(function (x) { return x !== w; });
-        V.characters.setKeywordExclusions(r.name, kw, list);
+        // v0.6.41：全源删除（同 removeKw——setKeywordExclusions 只写首源）
+        V.characters.removeKeywordExclusion(r.name, kw, w);
       });
-      renderKwe();
     }
     renderKwe();
 
@@ -782,9 +781,8 @@
       });
     }
     function removeExcl(x) {
-      var excls = (r.globalExclusions || []).filter(function (v) { return v !== x; });
-      V.characters.setGlobalExclusions(r.name, excls);
-      renderExcls();
+      // v0.6.41：全源删除（同 removeKw——setGlobalExclusions 只写首源）
+      V.characters.removeGlobalExclusion(r.name, x);
     }
     renderExcls();
 

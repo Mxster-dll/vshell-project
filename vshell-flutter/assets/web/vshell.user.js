@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.40
+// @version      0.6.41
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.40';
+window.VShell.version = '0.6.41';
 
 /* vshell 入口见 src/app.js */
 
@@ -1731,6 +1731,80 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     return found;
   }
 
+  /* ---------- v0.6.41 全源删除（跨源同名角色删除语义）----------
+   * UI 角色条目是**跨源同名合并**显示（listAll：首源条目 + 后续源词 push 到
+   * 末尾）。旧 setKeywords/setGlobalExclusions 只写 srcOfRole 返回的**第一个
+   * 源**→ 残留源重合并回末尾（用户反馈「点击删除按钮只会放到最后」根因），
+   * 且会把合并数组整体写入首源（跨源词污染）。删除类操作必须遍历**所有**
+   * 源（srcIds 全候选，含隐私/未激活）删词——任一源有改动才落盘+广播。 */
+
+  /** 删除关键词（全源同名角色同步删；顺带清理该关键词的独立词排除） */
+  function removeKeyword(name, k) {
+    var kk = String(k == null ? '' : k);
+    if (!kk || !name) return false;
+    var done = false;
+    srcIds().forEach(function (sid) {
+      var d = dataOf(sid);
+      var c = null;
+      d.chars.forEach(function (x) { if (!c && x.name === name) c = x; });
+      if (!c) return;
+      var changed = false;
+      if (Array.isArray(c.keywords) && c.keywords.indexOf(kk) >= 0) {
+        c.keywords = c.keywords.filter(function (x) { return x !== kk; });
+        changed = true;
+        if (c.kwExclusions && typeof c.kwExclusions === 'object') {
+          delete c.kwExclusions[kk];       // 同 setKeywords：被删关键词的独立词排除一并清
+        }
+      }
+      if (changed) { persistSrcData(sid, d); done = true; }
+    });
+    if (done) notify();
+    return done;
+  }
+
+  /** 删除全局排除词（全源同名角色同步删） */
+  function removeGlobalExclusion(name, x) {
+    var xx = String(x == null ? '' : x);
+    if (!xx || !name) return false;
+    var done = false;
+    srcIds().forEach(function (sid) {
+      var d = dataOf(sid);
+      var c = null;
+      d.chars.forEach(function (z) { if (!c && z.name === name) c = z; });
+      if (!c) return;
+      if (Array.isArray(c.globalExclusions) && c.globalExclusions.indexOf(xx) >= 0) {
+        c.globalExclusions = c.globalExclusions.filter(function (v) { return v !== xx; });
+        persistSrcData(sid, d);
+        done = true;
+      }
+    });
+    if (done) notify();
+    return done;
+  }
+
+  /** 删除独立词排除（全源同名角色、指定关键词绑定列表同步删） */
+  function removeKeywordExclusion(name, kw, w) {
+    var kk = String(kw == null ? '' : kw);
+    var ww = String(w == null ? '' : w);
+    if (!name || !kk || !ww) return false;
+    var done = false;
+    srcIds().forEach(function (sid) {
+      var d = dataOf(sid);
+      var c = null;
+      d.chars.forEach(function (z) { if (!c && z.name === name) c = z; });
+      if (!c) return;
+      var kwe = c.kwExclusions && typeof c.kwExclusions === 'object' ? c.kwExclusions : null;
+      if (!kwe || !Array.isArray(kwe[kk])) return;
+      if (kwe[kk].indexOf(ww) < 0) return;
+      kwe[kk] = kwe[kk].filter(function (v) { return v !== ww; });
+      if (!kwe[kk].length) delete kwe[kk];
+      persistSrcData(sid, d);
+      done = true;
+    });
+    if (done) notify();
+    return done;
+  }
+
   /** v0.6.31 **独立词命中**（导出供角色页等复用）：标题含关键词且**至少
    *  一次出现**不被任一独立词排除区间覆盖 → true。
    *  lowTitle 已小写；lowKw 已小写；kwExcls = [排除词,...]（原始大小写）。
@@ -2227,6 +2301,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     setExclusions: setExclusions,       // v0.5.9 旧名别名 → setGlobalExclusions
     setGlobalExclusions: setGlobalExclusions,     // v0.6.31：全局排除词
     setKeywordExclusions: setKeywordExclusions,   // v0.6.31：独立词排除（按关键词绑定）
+    removeKeyword: removeKeyword,                 // v0.6.41：全源删关键词
+    removeGlobalExclusion: removeGlobalExclusion, // v0.6.41：全源删全局排除词
+    removeKeywordExclusion: removeKeywordExclusion, // v0.6.41：全源删独立词排除
     kwHitTitle: kwHitTitle,             // v0.6.31：独立词命中判定（导出供角色页等复用）
     rename: rename,                     // v0.5.9：角色改名（全关联迁移）
     matchTitle: matchTitle,
@@ -6626,9 +6703,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       });
     }
     function removeKw(k) {
-      var kws = (r.keywords || []).filter(function (x) { return x !== k; });
-      V.characters.setKeywords(r.name, kws);
-      renderKws();
+      // v0.6.41：全源删除（跨源同名角色合并显示——旧 setKeywords 只写首个
+      // 源，残留源重合并回末尾，表现为「删除后词跑到最后」）
+      V.characters.removeKeyword(r.name, k);
     }
     renderKws();
 
@@ -6745,10 +6822,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     }
     function removeKwe(w, kws) {
       kws.forEach(function (kw) {
-        var list = (liveKwe()[kw] || []).filter(function (x) { return x !== w; });
-        V.characters.setKeywordExclusions(r.name, kw, list);
+        // v0.6.41：全源删除（同 removeKw——setKeywordExclusions 只写首源）
+        V.characters.removeKeywordExclusion(r.name, kw, w);
       });
-      renderKwe();
     }
     renderKwe();
 
@@ -6872,9 +6948,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       });
     }
     function removeExcl(x) {
-      var excls = (r.globalExclusions || []).filter(function (v) { return v !== x; });
-      V.characters.setGlobalExclusions(r.name, excls);
-      renderExcls();
+      // v0.6.41：全源删除（同 removeKw——setGlobalExclusions 只写首源）
+      V.characters.removeGlobalExclusion(r.name, x);
     }
     renderExcls();
 
