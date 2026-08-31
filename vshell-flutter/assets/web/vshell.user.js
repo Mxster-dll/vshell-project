@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.39
+// @version      0.6.40
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.39';
+window.VShell.version = '0.6.40';
 
 /* vshell 入口见 src/app.js */
 
@@ -6765,7 +6765,6 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       ownerBtn.innerHTML = '';
       ownerBtn.appendChild(V.utils.el('span', { className: 'vshell-char-kwex-owner-name' },
         kweOwner || '选择关键词'));
-      ownerBtn.appendChild(V.utils.el('span', { className: 'codicon codicon-chevron-down' }));
       ownerBtn.classList.toggle('is-empty', !kweOwner);
     }
     renderOwner();
@@ -6790,7 +6789,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     kweAdd.appendChild(kweAddBtn);
     mainBox.appendChild(kweAdd);
 
-    /** 点击归属胶囊 → 弹关键词列表选择 */
+    /** 点击归属胶囊 → 弹关键词列表选择（纯关键词胶囊列表，无标题/副文/取消钮；
+     * 胶囊样式与全局排除词胶囊完全一致，无删除钮即无悬停叉叉） */
     function pickOwner() {
       var kws = (r.keywords || []).slice();
       if (!kws.length) { V.toast.info('请先在「关键词」区添加关键词'); return; }
@@ -6799,24 +6799,13 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       });
       var box = V.utils.el('div', {
         className: 'vshell-modal vshell-tag-modal vshell-char-kwex-pick',
-      }, [
-        V.utils.el('div', { className: 'vshell-modal-title-row' }, [
-          V.utils.el('div', { className: 'vshell-modal-title' }, '独立词限制 → 选择归属关键词'),
-        ]),
-        V.utils.el('div', { className: 'vshell-modal-sub' },
-          '新添加的限制词将挂在所选关键词下；该关键词在限制词内部出现时不匹配'),
-      ]);
+      });
       var listEl = V.utils.el('div', { className: 'vshell-char-kwex-line' });
       kws.forEach(function (kw) {
-        var chip = V.utils.el('button', {
-          type: 'button',
-          className: 'vshell-char-kwchip vshell-char-kwex-owner-opt' + (kweOwner === kw ? ' is-active' : ''),
-        }, [
-          V.utils.el('span', { className: 'vshell-char-kwchip-name' }, kw),
-          kweOwner === kw
-            ? V.utils.el('span', { className: 'codicon codicon-check' })
-            : null,
-        ].filter(Boolean));
+        var chip = V.utils.el('span', {
+          className: 'vshell-char-kwchip',
+          title: '归属关键词：' + kw,
+        }, V.utils.el('span', { className: 'vshell-char-kwchip-name' }, kw));
         chip.onclick = function () {
           kweOwner = kw;
           renderOwner();
@@ -6825,19 +6814,16 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         listEl.appendChild(chip);
       });
       box.appendChild(listEl);
-      var foot = V.utils.el('div', { className: 'vshell-tag-foot' });
-      foot.appendChild(V.utils.el('button', {
-        className: 'vshell-btn vshell-btn-secondary',
-        onclick: close,
-      }, '取消'));
-      box.appendChild(foot);
       function close() {
         if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        document.removeEventListener('keydown', esc);
       }
+      function esc(e) { if (e.key === 'Escape') close(); }
       overlay.appendChild(box);
       overlay.addEventListener('mousedown', function (e) {
         if (e.target === overlay) close();
       });
+      document.addEventListener('keydown', esc);
       document.body.appendChild(overlay);
     }
 
@@ -6845,6 +6831,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       var v = kweInputEl.value.trim();
       if (!v) return;
       if (!kweOwner) { V.toast.info('请先点击输入框左侧胶囊选择归属关键词'); return; }
+      if (v.indexOf(kweOwner) < 0) {
+        V.toast.error('独立限制词「' + v + '」未包含所选关键词「' + kweOwner + '」，已取消');
+        return;
+      }
       var list = (liveKwe()[kweOwner] || []).slice();
       if (list.indexOf(v) < 0) list.push(v);
       V.characters.setKeywordExclusions(r.name, kweOwner, list);
@@ -23711,13 +23701,11 @@ html.vshell::-webkit-scrollbar {
  * 片段高亮）+ 添加行归属胶囊 + 归属选择弹窗 */
 /* v0.6.39：高亮用 VS Code 列表搜索高亮色（list-highlightForeground 亮蓝）
  * + 下划线——原 textBlockQuote-background 未定义导致背景失效、文字与
- * 胶囊同色，视觉上等于没高亮 */
+ * 胶囊同色，视觉上等于没高亮
+ * v0.6.40：去下划线（用户要求），保留亮蓝 + 加粗 */
 .vshell-char-kwex-hl {
   font-weight: 600;
   color: var(--vscode-list-highlightForeground, #2AAAFF);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  text-decoration-color: var(--vscode-list-highlightForeground, #2AAAFF);
 }
 .vshell .vshell-char-kwex-chip:hover .vshell-st-chip-del,
 .vshell .vshell-char-kwex-chip .vshell-st-chip-del:focus-visible {
@@ -23743,10 +23731,6 @@ html.vshell::-webkit-scrollbar {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.vshell-char-kwex-owner .codicon {
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground);
-}
 .vshell-char-kwex-owner.is-empty .vshell-char-kwex-owner-name {
   color: var(--vscode-descriptionForeground);
 }
@@ -23758,19 +23742,6 @@ html.vshell::-webkit-scrollbar {
   width: 320px;
   max-width: 86vw;
   padding: 16px;
-}
-.vshell-char-kwex-owner-opt {
-  border: none;
-  cursor: pointer;
-  opacity: 0.85;
-}
-.vshell-char-kwex-owner-opt:hover,
-.vshell-char-kwex-owner-opt.is-active {
-  opacity: 1;
-  background: var(--vscode-toolbar-hoverBackground);
-}
-.vshell-char-kwex-owner-opt.is-active .codicon {
-  color: var(--vscode-testing-iconPassed, #89d185);
 }
 .vshell-char-actions {
   display: flex;

@@ -675,7 +675,6 @@
       ownerBtn.innerHTML = '';
       ownerBtn.appendChild(V.utils.el('span', { className: 'vshell-char-kwex-owner-name' },
         kweOwner || '选择关键词'));
-      ownerBtn.appendChild(V.utils.el('span', { className: 'codicon codicon-chevron-down' }));
       ownerBtn.classList.toggle('is-empty', !kweOwner);
     }
     renderOwner();
@@ -700,7 +699,8 @@
     kweAdd.appendChild(kweAddBtn);
     mainBox.appendChild(kweAdd);
 
-    /** 点击归属胶囊 → 弹关键词列表选择 */
+    /** 点击归属胶囊 → 弹关键词列表选择（纯关键词胶囊列表，无标题/副文/取消钮；
+     * 胶囊样式与全局排除词胶囊完全一致，无删除钮即无悬停叉叉） */
     function pickOwner() {
       var kws = (r.keywords || []).slice();
       if (!kws.length) { V.toast.info('请先在「关键词」区添加关键词'); return; }
@@ -709,24 +709,13 @@
       });
       var box = V.utils.el('div', {
         className: 'vshell-modal vshell-tag-modal vshell-char-kwex-pick',
-      }, [
-        V.utils.el('div', { className: 'vshell-modal-title-row' }, [
-          V.utils.el('div', { className: 'vshell-modal-title' }, '独立词限制 → 选择归属关键词'),
-        ]),
-        V.utils.el('div', { className: 'vshell-modal-sub' },
-          '新添加的限制词将挂在所选关键词下；该关键词在限制词内部出现时不匹配'),
-      ]);
+      });
       var listEl = V.utils.el('div', { className: 'vshell-char-kwex-line' });
       kws.forEach(function (kw) {
-        var chip = V.utils.el('button', {
-          type: 'button',
-          className: 'vshell-char-kwchip vshell-char-kwex-owner-opt' + (kweOwner === kw ? ' is-active' : ''),
-        }, [
-          V.utils.el('span', { className: 'vshell-char-kwchip-name' }, kw),
-          kweOwner === kw
-            ? V.utils.el('span', { className: 'codicon codicon-check' })
-            : null,
-        ].filter(Boolean));
+        var chip = V.utils.el('span', {
+          className: 'vshell-char-kwchip',
+          title: '归属关键词：' + kw,
+        }, V.utils.el('span', { className: 'vshell-char-kwchip-name' }, kw));
         chip.onclick = function () {
           kweOwner = kw;
           renderOwner();
@@ -735,19 +724,16 @@
         listEl.appendChild(chip);
       });
       box.appendChild(listEl);
-      var foot = V.utils.el('div', { className: 'vshell-tag-foot' });
-      foot.appendChild(V.utils.el('button', {
-        className: 'vshell-btn vshell-btn-secondary',
-        onclick: close,
-      }, '取消'));
-      box.appendChild(foot);
       function close() {
         if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        document.removeEventListener('keydown', esc);
       }
+      function esc(e) { if (e.key === 'Escape') close(); }
       overlay.appendChild(box);
       overlay.addEventListener('mousedown', function (e) {
         if (e.target === overlay) close();
       });
+      document.addEventListener('keydown', esc);
       document.body.appendChild(overlay);
     }
 
@@ -755,6 +741,10 @@
       var v = kweInputEl.value.trim();
       if (!v) return;
       if (!kweOwner) { V.toast.info('请先点击输入框左侧胶囊选择归属关键词'); return; }
+      if (v.indexOf(kweOwner) < 0) {
+        V.toast.error('独立限制词「' + v + '」未包含所选关键词「' + kweOwner + '」，已取消');
+        return;
+      }
       var list = (liveKwe()[kweOwner] || []).slice();
       if (list.indexOf(v) < 0) list.push(v);
       V.characters.setKeywordExclusions(r.name, kweOwner, list);

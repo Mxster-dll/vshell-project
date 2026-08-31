@@ -3194,13 +3194,11 @@
  * 片段高亮）+ 添加行归属胶囊 + 归属选择弹窗 */
 /* v0.6.39：高亮用 VS Code 列表搜索高亮色（list-highlightForeground 亮蓝）
  * + 下划线——原 textBlockQuote-background 未定义导致背景失效、文字与
- * 胶囊同色，视觉上等于没高亮 */
+ * 胶囊同色，视觉上等于没高亮
+ * v0.6.40：去下划线（用户要求），保留亮蓝 + 加粗 */
 .vshell-char-kwex-hl {
   font-weight: 600;
   color: var(--vscode-list-highlightForeground, #2AAAFF);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  text-decoration-color: var(--vscode-list-highlightForeground, #2AAAFF);
 }
 .vshell .vshell-char-kwex-chip:hover .vshell-st-chip-del,
 .vshell .vshell-char-kwex-chip .vshell-st-chip-del:focus-visible {
@@ -3226,10 +3224,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.vshell-char-kwex-owner .codicon {
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground);
-}
 .vshell-char-kwex-owner.is-empty .vshell-char-kwex-owner-name {
   color: var(--vscode-descriptionForeground);
 }
@@ -3241,19 +3235,6 @@
   width: 320px;
   max-width: 86vw;
   padding: 16px;
-}
-.vshell-char-kwex-owner-opt {
-  border: none;
-  cursor: pointer;
-  opacity: 0.85;
-}
-.vshell-char-kwex-owner-opt:hover,
-.vshell-char-kwex-owner-opt.is-active {
-  opacity: 1;
-  background: var(--vscode-toolbar-hoverBackground);
-}
-.vshell-char-kwex-owner-opt.is-active .codicon {
-  color: var(--vscode-testing-iconPassed, #89d185);
 }
 .vshell-char-actions {
   display: flex;
