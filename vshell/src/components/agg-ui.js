@@ -532,7 +532,14 @@
       if (n) toast('已创建 ' + n + ' 个组', true);
     });
     mk('添加到组', 'vshell-btn', false, function (ms) { pickGroup(ms); });
-    mk('取消', 'vshell-btn-secondary', false, function () { exitMultiSelect(); });
+    // v0.6.8 修复：取消按钮不走 mk 的选中检查——0 个选中（含初始默认选中
+    // 被手动取消）时也必须能退出多选状态
+    var cancelBtn = V.utils.el('button', {
+      className: 'vshell-btn vshell-btn-secondary', type: 'button',
+      onclick: function () { exitMultiSelect(); },
+    }, '取消');
+    multi.btns.push(cancelBtn);
+    bar.appendChild(cancelBtn);
     var host = document.querySelector('.vshell-app') || document.body;
     host.appendChild(bar);
     multi.bar = bar;
