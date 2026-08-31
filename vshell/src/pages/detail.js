@@ -514,7 +514,7 @@
       ]);
       main.appendChild(titleRow);
 
-      // 2. 信息条：播放 · 弹幕 · 日期 · 时长（· 分区标签）
+      // 2. 信息条：播放 · 弹幕 · 日期（· 分区标签）——v0.6.17：不再显示时长
       var stats = V.utils.el('div', { className: 'vshell-detail-stats' }, [
         V.utils.el('span', { className: 'vshell-detail-stats-item' },
           V.utils.fmtCount(detail.stat && detail.stat.view) + ' 播放'),
@@ -525,8 +525,6 @@
         detail.pubdate
           ? V.utils.el('span', { className: 'vshell-detail-stats-item' }, fmtDate(detail.pubdate))
           : null,
-        V.utils.el('span', { className: 'vshell-detail-stats-item' },
-          V.utils.fmtTime(detail.duration)),
         detail.tname
           ? V.utils.el('span', { className: 'vshell-detail-meta-tag' }, detail.tname)
           : null,
