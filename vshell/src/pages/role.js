@@ -579,6 +579,12 @@
               }
               return out;
             },
+            // v0.6.20 预取刷新后热更新已渲染卡片 stat
+            onData: function () {
+              if (V.videoCard && V.videoCard.hotUpdateStats && s.kws[kw]) {
+                V.videoCard.hotUpdateStats(s.kws[kw].items());
+              }
+            },
           });
         });
         agg.feeds[id] = s;

@@ -68,6 +68,12 @@
           loadingEl.hidden = true;
           if (sentinelEl) { try { sentinelEl.el.remove(); } catch (e) { /* noop */ } sentinelEl = null; }
         },
+        // v0.6.20 预取刷新后热更新已渲染卡片 stat
+        onData: function () {
+          if (V.videoCard && V.videoCard.hotUpdateStats && feed) {
+            V.videoCard.hotUpdateStats(feed.items());
+          }
+        },
       });
       feed.init().then(function () {
         if (state.done) return;

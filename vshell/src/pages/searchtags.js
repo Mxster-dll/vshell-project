@@ -93,6 +93,12 @@
             filter: function (items) {
               return V.blacklist ? V.blacklist.filter(items) : items;
             },
+            // v0.6.20 预取刷新后热更新已渲染卡片 stat
+            onData: function () {
+              if (V.videoCard && V.videoCard.hotUpdateStats && s.kws[kw]) {
+                V.videoCard.hotUpdateStats(s.kws[kw].items());
+              }
+            },
           });
         });
         state.srcs[id] = s;

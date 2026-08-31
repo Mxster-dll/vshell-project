@@ -41,6 +41,12 @@
         fetchFn: function (page) { return opts.fetch(id, page); },
         filter: opts.filter,
         onDrain: function () { checkAllDone(); },
+        // v0.6.20 后台预取刷新缓存后，原地热更新已渲染卡片的播放/弹幕数
+        onData: function () {
+          if (V.videoCard && V.videoCard.hotUpdateStats && feeds[id]) {
+            V.videoCard.hotUpdateStats(feeds[id].items());
+          }
+        },
       });
     });
 

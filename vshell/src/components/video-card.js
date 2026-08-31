@@ -743,5 +743,33 @@
     return nodes;
   }
 
-  V.videoCard = { create: create };
+  /**
+   * v0.6.20 已渲染卡片 stat 热更新：后台预取（source-feed onData）刷新缓存后，
+   * 原地更新 DOM 上已有卡片的播放/弹幕数——不重建 DOM、不动滚动位置。
+   * list = feed.items()（最新合并 history，含 stat）。
+   * 匹配：data-id 相同 + data-src 相同（防跨源同 id 碰撞，如 17c/kkav 纯数字 id）。
+   * 组卡（data-id=grp:xxx）不在列表内自然跳过。cover 布局无 .vsc-video-stats 跳过。
+   */
+  function hotUpdateStats(list) {
+    if (!list || !list.length) return;
+    var map = {};
+    list.forEach(function (it) {
+      if (it && it.id) map[String(it.id)] = it;
+    });
+    var cards = document.querySelectorAll('.vsc-video-card');
+    for (var i = 0; i < cards.length; i++) {
+      var card = cards[i];
+      var vid = card.getAttribute('data-id');
+      if (!vid || !map[vid]) continue;
+      var it = map[vid];
+      if (it.sourceId && card.getAttribute('data-src') !== it.sourceId) continue;
+      if (!it.stat) continue;
+      var nums = card.querySelectorAll('.vsc-video-stats .vsc-video-stats-num');
+      if (!nums || !nums.length) continue;
+      nums[0].textContent = V.utils.fmtCount(it.stat.view);
+      if (nums[1] && it.stat.danmaku) nums[1].textContent = V.utils.fmtCount(it.stat.danmaku);
+    }
+  }
+
+  V.videoCard = { create: create, hotUpdateStats: hotUpdateStats };
 })();

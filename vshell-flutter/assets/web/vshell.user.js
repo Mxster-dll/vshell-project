@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.19
+// @version      0.6.21
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.19';
+window.VShell.version = '0.6.21';
 
 /* vshell 入口见 src/app.js */
 
@@ -7625,7 +7625,35 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     return nodes;
   }
 
-  V.videoCard = { create: create };
+  /**
+   * v0.6.20 已渲染卡片 stat 热更新：后台预取（source-feed onData）刷新缓存后，
+   * 原地更新 DOM 上已有卡片的播放/弹幕数——不重建 DOM、不动滚动位置。
+   * list = feed.items()（最新合并 history，含 stat）。
+   * 匹配：data-id 相同 + data-src 相同（防跨源同 id 碰撞，如 17c/kkav 纯数字 id）。
+   * 组卡（data-id=grp:xxx）不在列表内自然跳过。cover 布局无 .vsc-video-stats 跳过。
+   */
+  function hotUpdateStats(list) {
+    if (!list || !list.length) return;
+    var map = {};
+    list.forEach(function (it) {
+      if (it && it.id) map[String(it.id)] = it;
+    });
+    var cards = document.querySelectorAll('.vsc-video-card');
+    for (var i = 0; i < cards.length; i++) {
+      var card = cards[i];
+      var vid = card.getAttribute('data-id');
+      if (!vid || !map[vid]) continue;
+      var it = map[vid];
+      if (it.sourceId && card.getAttribute('data-src') !== it.sourceId) continue;
+      if (!it.stat) continue;
+      var nums = card.querySelectorAll('.vsc-video-stats .vsc-video-stats-num');
+      if (!nums || !nums.length) continue;
+      nums[0].textContent = V.utils.fmtCount(it.stat.view);
+      if (nums[1] && it.stat.danmaku) nums[1].textContent = V.utils.fmtCount(it.stat.danmaku);
+    }
+  }
+
+  V.videoCard = { create: create, hotUpdateStats: hotUpdateStats };
 })();
 
 
@@ -8775,7 +8803,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         loading = false;
         inflight = null;
         updateDone();
-        if (got) { try { if (opts.onData) opts.onData(); } catch (e) { /* noop */ } }
+        // v0.6.20：onData **每次预取完成都触发**（不只净新增）——纯交集刷新
+        // 也更新了 history 里的 stat（播放/弹幕），已渲染卡片需要跟随热更新。
+        try { if (opts.onData) opts.onData(); } catch (e) { /* noop */ }
         return !!got;
       }).catch(function () {
         loading = false;
@@ -8843,6 +8873,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       hasMore: function () { return hasMore; },
       isDone: isDone,
       ready: ready,
+      /** 最新合并结果快照（history，最新在前）——onData 热更新用 */
+      items: function () { return history.slice(); },
       destroy: destroy,
     };
   }
@@ -8896,6 +8928,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         fetchFn: function (page) { return opts.fetch(id, page); },
         filter: opts.filter,
         onDrain: function () { checkAllDone(); },
+        // v0.6.20 后台预取刷新缓存后，原地热更新已渲染卡片的播放/弹幕数
+        onData: function () {
+          if (V.videoCard && V.videoCard.hotUpdateStats && feeds[id]) {
+            V.videoCard.hotUpdateStats(feeds[id].items());
+          }
+        },
       });
     });
 
@@ -14127,6 +14165,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           loadingEl.hidden = true;
           if (sentinelEl) { try { sentinelEl.el.remove(); } catch (e) { /* noop */ } sentinelEl = null; }
         },
+        // v0.6.20 预取刷新后热更新已渲染卡片 stat
+        onData: function () {
+          if (V.videoCard && V.videoCard.hotUpdateStats && feed) {
+            V.videoCard.hotUpdateStats(feed.items());
+          }
+        },
       });
       feed.init().then(function () {
         if (state.done) return;
@@ -16078,6 +16122,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
             filter: function (items) {
               return V.blacklist ? V.blacklist.filter(items) : items;
             },
+            // v0.6.20 预取刷新后热更新已渲染卡片 stat
+            onData: function () {
+              if (V.videoCard && V.videoCard.hotUpdateStats && s.kws[kw]) {
+                V.videoCard.hotUpdateStats(s.kws[kw].items());
+              }
+            },
           });
         });
         state.srcs[id] = s;
@@ -17020,6 +17070,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
                 });
               }
               return out;
+            },
+            // v0.6.20 预取刷新后热更新已渲染卡片 stat
+            onData: function () {
+              if (V.videoCard && V.videoCard.hotUpdateStats && s.kws[kw]) {
+                V.videoCard.hotUpdateStats(s.kws[kw].items());
+              }
             },
           });
         });

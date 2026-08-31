@@ -259,7 +259,9 @@
         loading = false;
         inflight = null;
         updateDone();
-        if (got) { try { if (opts.onData) opts.onData(); } catch (e) { /* noop */ } }
+        // v0.6.20：onData **每次预取完成都触发**（不只净新增）——纯交集刷新
+        // 也更新了 history 里的 stat（播放/弹幕），已渲染卡片需要跟随热更新。
+        try { if (opts.onData) opts.onData(); } catch (e) { /* noop */ }
         return !!got;
       }).catch(function () {
         loading = false;
@@ -327,6 +329,8 @@
       hasMore: function () { return hasMore; },
       isDone: isDone,
       ready: ready,
+      /** 最新合并结果快照（history，最新在前）——onData 热更新用 */
+      items: function () { return history.slice(); },
       destroy: destroy,
     };
   }
