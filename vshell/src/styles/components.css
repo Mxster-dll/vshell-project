@@ -2756,6 +2756,13 @@
 .vshell-detail-related-skel .vshell-detail-related-info .vshell-skeleton-line {
   display: block;
 }
+/* v0.6.15：加载中先用卡片封面占位（详情到达后由播放器/详情封面替换） */
+.vshell-detail-poster-skel {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 
 /* ================= 角色系统（v0.5.0，标签升级） ================= */
 

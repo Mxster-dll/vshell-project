@@ -129,15 +129,40 @@
       if (ak) main.appendChild(ak);
     }
 
+    // v0.6.15：来源卡片快照（video-card 点击详情链接前写入）——详情加载中
+    // 标题/封面先用卡片值占位，加载完成后由详情数据替换
+    var cardSnap = window.__VS_LAST_CARD__ || null;
+    /** 快照匹配：普通（源,id）一致；组卡（id 含 grp: 前缀）按组 id 匹配 */
+    function snapFor(mSrc, mId) {
+      if (!cardSnap) return null;
+      var sid = String(cardSnap.id || '');
+      if (sid.indexOf('grp:') === 0) {
+        return (isGroup && gid === sid) ? cardSnap : null;
+      }
+      if (cardSnap.src === mSrc && sid === String(mId)) return cardSnap;
+      return null;
+    }
+
     /** v0.6.14：同构骨架——主区骨架与真实 renderMain 布局一致：
      *  标题行（条+禁用复制钮）→ 信息条（播放/弹幕/日期/时长小块）→
      *  UP 行（头像圆+名字条）→ 播放卡片（16:9 大块）；
-     *  操作行（真实静态）与简介骨架由 loadMember 在外部按序挂载 */
-    function skeletonMain() {
+     *  操作行（真实静态）与简介骨架由 loadMember 在外部按序挂载。
+     *  v0.6.15：snap 为来源卡片快照——标题显示真实文本、封面显示真实图
+     *  （无快照/无值则回落骨架占位）；加载完成后 renderMain 整体替换 */
+    function skeletonMain(snap) {
+      snap = snap || null;
+      var titleEl = (snap && snap.title)
+        ? V.utils.el('h1', { className: 'vshell-detail-title' }, snap.title)
+        : V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '62%' } });
+      var playerBody = (snap && snap.pic)
+        ? V.utils.el('img', {
+            className: 'vshell-detail-poster-skel', src: snap.pic, alt: '',
+          })
+        : V.utils.el('div', { className: 'vshell-skeleton-block vshell-skeleton-player' });
       return V.utils.el('div', { className: 'vshell-detail-skeleton vshell-detail-skeleton-iso' }, [
-        // 1. 标题行：标题条 + 禁用的复制按钮（布局与真实一致）
+        // 1. 标题行：标题（快照文本或骨架条）+ 禁用的复制按钮（布局与真实一致）
         V.utils.el('div', { className: 'vshell-detail-title-row' }, [
-          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '62%' } }),
+          titleEl,
           V.utils.el('button', {
             className: 'vshell-icon-btn vshell-detail-copy',
             type: 'button', disabled: 'disabled',
@@ -156,10 +181,8 @@
           V.utils.el('span', { className: 'vshell-skeleton-circle' }),
           V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '96px' } }),
         ]),
-        // 4. 播放卡片：16:9 大块（视频卡形状）
-        V.utils.el('div', { className: 'vshell-detail-player-card' }, [
-          V.utils.el('div', { className: 'vshell-skeleton-block vshell-skeleton-player' }),
-        ]),
+        // 4. 播放卡片：封面图（快照）或 16:9 大块（骨架）
+        V.utils.el('div', { className: 'vshell-detail-player-card' }, [playerBody]),
       ]);
     }
     /** v0.6.14：简介骨架（操作行之后，与真实顺序一致） */
@@ -238,7 +261,9 @@
       side.innerHTML = '';
       // v0.6.14：同构骨架——与真实详情布局一致（标题行/信息条/UP 行/视频卡/
       // 简介/相关推荐项），各元素为加载动效占位；操作行/返回按钮为真实静态组件
-      main.insertBefore(skeletonMain(), actionsRow);
+      // v0.6.15：有卡片快照时，标题/封面先用卡片值（真实文本/封面图）占位
+      var snap = snapFor(mSrc, mId);
+      main.insertBefore(skeletonMain(snap), actionsRow);
       main.appendChild(skeletonDesc());      // 简介骨架：操作行之后（真实顺序一致）
       side.appendChild(skeletonSide());
       // 源未启用：直接空态，不发起网络请求（避免网络失败提示掩盖未启用提示）

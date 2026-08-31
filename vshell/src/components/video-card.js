@@ -661,6 +661,18 @@
     // agg-ui 的 memberOf 用 __item 反查组或成员引用。
     card.__item = item;
     card.__orig = origItem;
+    // v0.6.15：点击进详情前记录卡片快照（详情页加载中先用卡片标题/封面
+    // 占位，加载完成后由详情数据替换）——捕获阶段统一覆盖 media/title/meta 链接
+    card.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href^="#/video/"]') : null;
+      if (!a) return;
+      window.__VS_LAST_CARD__ = {
+        src: item.sourceId || '',
+        id: item.id,
+        title: item.title || '',
+        pic: item.pic || item.cover || '',
+      };
+    }, true);
     if (V.aggUi) {
       card.addEventListener('contextmenu', function (e) {
         e.preventDefault();
