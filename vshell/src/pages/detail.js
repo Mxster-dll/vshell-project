@@ -135,7 +135,22 @@
     // 组详情（grp:）不落表 → 占位回退骨架。
     function tableSnap(mSrc, mId) {
       if (!V.videoTable || !V.videoTable.queryDetail) return null;
-      if (isGroup) return null;
+      if (isGroup) {
+        // v0.6.25：组详情占位用**组数据**（聚合组标题/封面 = 预览获得的数据，
+        // 组卡上已经显示）——组不落 videos 表（组不是视频），但加载中不应
+        // 退回骨架。成员详情加载完成后由 renderMain 整体替换（并 touchDetail
+        // 更新该成员的后端数据）。coverSrc 供封面解密/拼 baseUrl 用。
+        var g = (V.aggregations && V.aggregations.getGroup)
+          ? V.aggregations.getGroup(gid) : null;
+        if (g && g.title) {
+          return {
+            title: g.title, pic: g.cover || '',
+            coverSrc: g.coverSrc || mSrc,
+            view: null, danmaku: null, pubdate: null, duration: 0,
+          };
+        }
+        return null;
+      }
       var s = null;
       try { s = V.videoTable.queryDetail(mSrc, mId); } catch (e) { return null; }
       if (!s) return null;
@@ -196,14 +211,17 @@
           })
         : V.utils.el('div', { className: 'vshell-skeleton-block vshell-skeleton-player' });
       // v0.6.23：加密图源（17c）占位封面异步解密（picUrlOf 拼 baseUrl+解密）
+      // v0.6.25：解密用 snap.coverSrc 优先（组封面可能来自非当前成员源）
       if (snap && snap.pic && mSrc && V.aggregations && V.aggregations.picUrlOf
-        && V.siteAdapters && V.siteAdapters.picDecryptorFor
-        && V.siteAdapters.picDecryptorFor(mSrc)) {
-        var imgEl = playerBody.tagName === 'IMG' ? playerBody : null;
-        if (imgEl) {
-          V.aggregations.picUrlOf(mSrc, { pic: snap.pic }).then(function (u) {
-            if (u && imgEl.isConnected) imgEl.src = u;
-          }).catch(function () { /* 保持原样 */ });
+        && V.siteAdapters && V.siteAdapters.picDecryptorFor) {
+        var decSrc = snap.coverSrc || mSrc;
+        if (V.siteAdapters.picDecryptorFor(decSrc)) {
+          var imgEl = playerBody.tagName === 'IMG' ? playerBody : null;
+          if (imgEl) {
+            V.aggregations.picUrlOf(decSrc, { pic: snap.pic }).then(function (u) {
+              if (u && imgEl.isConnected) imgEl.src = u;
+            }).catch(function () { /* 保持原样 */ });
+          }
         }
       }
       // v0.6.18：信息条先显示卡片播放量/弹幕/日期（无快照值 → 骨架条）

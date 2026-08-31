@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.24
+// @version      0.6.25
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.24';
+window.VShell.version = '0.6.25';
 
 /* vshell 入口见 src/app.js */
 
@@ -14592,7 +14592,22 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     // 组详情（grp:）不落表 → 占位回退骨架。
     function tableSnap(mSrc, mId) {
       if (!V.videoTable || !V.videoTable.queryDetail) return null;
-      if (isGroup) return null;
+      if (isGroup) {
+        // v0.6.25：组详情占位用**组数据**（聚合组标题/封面 = 预览获得的数据，
+        // 组卡上已经显示）——组不落 videos 表（组不是视频），但加载中不应
+        // 退回骨架。成员详情加载完成后由 renderMain 整体替换（并 touchDetail
+        // 更新该成员的后端数据）。coverSrc 供封面解密/拼 baseUrl 用。
+        var g = (V.aggregations && V.aggregations.getGroup)
+          ? V.aggregations.getGroup(gid) : null;
+        if (g && g.title) {
+          return {
+            title: g.title, pic: g.cover || '',
+            coverSrc: g.coverSrc || mSrc,
+            view: null, danmaku: null, pubdate: null, duration: 0,
+          };
+        }
+        return null;
+      }
       var s = null;
       try { s = V.videoTable.queryDetail(mSrc, mId); } catch (e) { return null; }
       if (!s) return null;
@@ -14653,14 +14668,17 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           })
         : V.utils.el('div', { className: 'vshell-skeleton-block vshell-skeleton-player' });
       // v0.6.23：加密图源（17c）占位封面异步解密（picUrlOf 拼 baseUrl+解密）
+      // v0.6.25：解密用 snap.coverSrc 优先（组封面可能来自非当前成员源）
       if (snap && snap.pic && mSrc && V.aggregations && V.aggregations.picUrlOf
-        && V.siteAdapters && V.siteAdapters.picDecryptorFor
-        && V.siteAdapters.picDecryptorFor(mSrc)) {
-        var imgEl = playerBody.tagName === 'IMG' ? playerBody : null;
-        if (imgEl) {
-          V.aggregations.picUrlOf(mSrc, { pic: snap.pic }).then(function (u) {
-            if (u && imgEl.isConnected) imgEl.src = u;
-          }).catch(function () { /* 保持原样 */ });
+        && V.siteAdapters && V.siteAdapters.picDecryptorFor) {
+        var decSrc = snap.coverSrc || mSrc;
+        if (V.siteAdapters.picDecryptorFor(decSrc)) {
+          var imgEl = playerBody.tagName === 'IMG' ? playerBody : null;
+          if (imgEl) {
+            V.aggregations.picUrlOf(decSrc, { pic: snap.pic }).then(function (u) {
+              if (u && imgEl.isConnected) imgEl.src = u;
+            }).catch(function () { /* 保持原样 */ });
+          }
         }
       }
       // v0.6.18：信息条先显示卡片播放量/弹幕/日期（无快照值 → 骨架条）
