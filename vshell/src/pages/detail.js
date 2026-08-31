@@ -143,6 +143,35 @@
       return null;
     }
 
+    /** v0.6.19：详情加载后把最新播放/弹幕数回写各墙缓存分片——卡片=列表
+     *  快照（source-feed 缓存，可能陈旧）、详情=实时请求，接口本身同源
+     *  （实测同时请求差 ≤2）；回写后下次墙渲染显示新值，缩小时间差 */
+    function refreshCachedStat(srcId, id, stat) {
+      if (!stat || stat.view == null || !srcId || srcId === 'local') return;
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k.indexOf('vshell.wall.') !== 0) continue;
+        // 分片键后缀 = 源（如 vshell.wall.home.acfun 结尾 '.acfun'——6 字符）
+        if (k.length < ('.' + srcId).length
+          || k.indexOf('.' + srcId) !== k.length - ('.' + srcId).length) continue;
+        var key = k.slice('vshell.'.length);
+        var raw = null;
+        try { raw = V.store.get(key); } catch (e) { continue; }
+        if (!raw || !raw.items) continue;
+        var changed = false;
+        for (var j = 0; j < raw.items.length; j++) {
+          var it = raw.items[j];
+          if (it && String(it.id) === String(id)) {
+            if (!it.stat) it.stat = {};
+            it.stat.view = stat.view;
+            it.stat.danmaku = stat.danmaku;
+            changed = true;
+          }
+        }
+        if (changed) V.store.set(key, raw);
+      }
+    }
+
     /** v0.6.14：同构骨架——主区骨架与真实 renderMain 布局一致：
      *  标题行（条+禁用复制钮）→ 信息条（播放量行）→
      *  UP 行（头像圆+名字条）→ 播放卡片（16:9 大块）；
@@ -507,6 +536,8 @@
       // v0.6.12：静态操作行的当前详情 + 状态刷新 + 意图补执行
       curDetail = detail;
       updateChip(src, id, detail.title);   // v0.6.1 组详情：回填成员 chip 标题
+      // v0.6.19：详情加载后回写最新播放/弹幕数到墙缓存（下次卡片显示新值）
+      if (!isGroup) refreshCachedStat(detail.sourceId || detailSrc, id, detail.stat);
       refreshSaveBtns();
       if (pendingAction) {
         var pa = pendingAction;
