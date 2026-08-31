@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.53
+// @version      0.6.54
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.53';
+window.VShell.version = '0.6.54';
 
 /* vshell 入口见 src/app.js */
 
@@ -25727,7 +25727,8 @@ body.vshell-dragging a { pointer-events: none; }
   padding: 20px 10% 48px;
 }
 /* v0.6.53：返回按钮浮动定位（仿详情页 .vshell-detail-back）——绝对定位
-   在角色背景左侧，完全脱离文档流不影响背景卡片位置；「角色主页」标题已删 */
+   在角色背景左侧，完全脱离文档流不影响背景卡片位置；「角色主页」标题已删
+   v0.6.54：无背景（仅图标，透明底）+ 位置往右下偏（left 20→30 / top 16→28） */
 .vshell .vshell-role-back {
   position: absolute;
   z-index: 6;
@@ -25735,15 +25736,16 @@ body.vshell-dragging a { pointer-events: none; }
   width: 24px;
   height: 24px;
   font-size: 13px;
-  left: 20px;
-  top: 16px;
-  background: var(--vscode-button-secondaryBackground);
-  color: var(--vscode-button-secondaryForeground);
+  left: 30px;
+  top: 28px;
+  background: transparent;
+  color: var(--vscode-foreground);
   border-radius: 6px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  box-shadow: none;
 }
 .vshell .vshell-role-back:hover {
-  background: var(--vscode-button-secondaryHoverBackground);
+  background: rgba(127, 127, 127, 0.25);
+  color: var(--vscode-foreground);
 }
 .vshell-role-banner {
   position: relative;

@@ -514,7 +514,8 @@
   padding: 20px 10% 48px;
 }
 /* v0.6.53：返回按钮浮动定位（仿详情页 .vshell-detail-back）——绝对定位
-   在角色背景左侧，完全脱离文档流不影响背景卡片位置；「角色主页」标题已删 */
+   在角色背景左侧，完全脱离文档流不影响背景卡片位置；「角色主页」标题已删
+   v0.6.54：无背景（仅图标，透明底）+ 位置往右下偏（left 20→30 / top 16→28） */
 .vshell .vshell-role-back {
   position: absolute;
   z-index: 6;
@@ -522,15 +523,16 @@
   width: 24px;
   height: 24px;
   font-size: 13px;
-  left: 20px;
-  top: 16px;
-  background: var(--vscode-button-secondaryBackground);
-  color: var(--vscode-button-secondaryForeground);
+  left: 30px;
+  top: 28px;
+  background: transparent;
+  color: var(--vscode-foreground);
   border-radius: 6px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  box-shadow: none;
 }
 .vshell .vshell-role-back:hover {
-  background: var(--vscode-button-secondaryHoverBackground);
+  background: rgba(127, 127, 127, 0.25);
+  color: var(--vscode-foreground);
 }
 .vshell-role-banner {
   position: relative;
