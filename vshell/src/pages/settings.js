@@ -393,6 +393,30 @@
     // 数据：清除观看记录 / 清除缓存（二次确认，同下载页清除按钮 .is-confirm 语义）
     body.appendChild(sec('数据', (function () {
       var wrap = V.utils.el('div', { className: 'vshell-settings-data' });
+      // 右下角显示网络请求（调试）开关（v0.6.4：原硬编码固定开启，
+      // 用户需求可关）——即时生效：reqDebugOn() 每次实时读 store 键，
+      // 无需 dirty/reload
+      var reqOn = !!(V.store && V.store.get('reqDebug', true) !== false);
+      var reqRow = V.utils.el('div', {
+        className: 'vshell-radio' + (reqOn ? ' is-checked' : ''),
+        role: 'checkbox',
+        'aria-checked': reqOn ? 'true' : 'false',
+        tabindex: 0,
+      }, [V.utils.el('span', { className: 'vshell-radio-label' },
+        '右下角显示网络请求（调试）')]);
+      reqRow.addEventListener('click', function () {
+        var next = !reqOn;
+        reqOn = next;
+        if (V.store) V.store.set('reqDebug', next);
+        reqRow.classList.toggle('is-checked', next);
+        reqRow.setAttribute('aria-checked', next ? 'true' : 'false');
+        (V.toast ? V.toast.ok : function (m) { alert(m); })(
+          next ? '已开启网络请求显示' : '已关闭网络请求显示');
+      });
+      reqRow.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); reqRow.click(); }
+      });
+      wrap.appendChild(reqRow);
       // 清除观看记录
       var btn = V.utils.el('button', {
         className: 'vshell-btn vshell-btn-secondary vshell-settings-clear',

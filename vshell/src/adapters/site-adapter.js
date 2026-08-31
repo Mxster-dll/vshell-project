@@ -95,12 +95,20 @@
 
   // ---- v0.5.9 调试：数据源请求 toast（用户需求：调试时右下角弹信息）----
   // 包装适配器契约方法，调用时 V.toast 右下角提示 [源名] 方法名。
-  // 开关：window.__VS_REQ_DEBUG__ === false 关闭（默认开启）。
+  // 开关：设置页「数据」组「右下角显示网络请求」→ V.store 'reqDebug'
+  // 键（默认 true，保持 v0.5.9 起硬编码开启的行为）；window.__VS_REQ_DEBUG__
+  // === false 为旧探针兼容通道。
   var DEBUG_METHODS = ['getHomeSections', 'getCategoryVideos', 'getHomeFeed',
     'getVideoDetail', 'getPlayInfo', 'getRelated', 'search', 'parseVideoId'];
   var wrappedCache = new WeakMap();
 
   function reqDebugOn() {
+    try {
+      var V = window.VShell;
+      if (V && V.store && V.store.get) {
+        return V.store.get('reqDebug', true) !== false;
+      }
+    } catch (e) { /* noop */ }
     return window.__VS_REQ_DEBUG__ !== false;
   }
   function reqToast(name, method, arg0) {
