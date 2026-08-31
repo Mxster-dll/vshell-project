@@ -158,10 +158,11 @@
     }
     if (isGrp(m)) {
       itemBtn('添加到组', 'codicon-list-unordered', function () { closeMenu(); pickGroup([m]); });
+      itemBtn('多选', 'codicon-check-all', function () { closeMenu(); startMultiSelect(card); });
     } else {
       itemBtn('新增为组', 'codicon-add', function () { closeMenu(); createGroupDlg([m]); });
       itemBtn('添加到组', 'codicon-list-unordered', function () { closeMenu(); pickGroup([m]); });
-      itemBtn('多选', 'codicon-check-all', function () { closeMenu(); startMultiSelect(); });
+      itemBtn('多选', 'codicon-check-all', function () { closeMenu(); startMultiSelect(card); });
     }
     host.appendChild(menu);
     ctx.menu = menu;
@@ -250,7 +251,8 @@
 
   /* ---------------- 建组弹窗（≥2 成员选标题封面；1 成员直接建） ---------------- */
   function createGroupDlg(members) {
-    members = (members || []).filter(Boolean);
+    // v0.6.5 组卡多选后「新增为一组」：组是聚合容器不能当成员——过滤组项
+    members = (members || []).filter(function (m) { return !isGrp(m); });
     if (!members.length) return;
     var A = V.aggregations;
     if (members.length === 1) {
@@ -491,11 +493,13 @@
     });
   }
 
-  function startMultiSelect() {
+  function startMultiSelect(startCard) {
     if (multi.active) return;
     multi.active = true;
     document.body.classList.add('vshell-multi-active');
     document.querySelectorAll('.vsc-video-card').forEach(registerCard);
+    // v0.6.5 右键「多选」进入：触发卡一开始就处于选中状态
+    if (startCard && startCard.classList) startCard.classList.add('is-multi-selecting');
     var bar = V.utils.el('div', { className: 'vshell-multi-bar' });
     multi.countEl = V.utils.el('span', { className: 'vshell-multi-count' }, '已选 0 张');
     bar.appendChild(multi.countEl);
@@ -518,6 +522,7 @@
     mk('新增为多组', 'vshell-btn', true, function (ms) {
       var n = 0;
       ms.forEach(function (m) {
+        if (isGrp(m)) return;   // v0.6.5 组是容器不能当成员，跳过
         var gid = V.aggregations.createGroup([{ src: m.src, id: m.id }], {
           title: m.title || m.id, cover: m.pic || '',
           coverSrc: m.sourceId || m.src, auto: false,
