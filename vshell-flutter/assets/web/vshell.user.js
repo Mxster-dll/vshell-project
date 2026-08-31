@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = 'v54';
+window.VShell.version = 'v55';
 
 /* vshell 入口见 src/app.js */
 
@@ -7306,6 +7306,22 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       V.aggregations.scheduleScan(origItem);
     }
 
+    // v0.6.2 聚合二期：交互代理——右键菜单 / 长按拖拽 / 多选。
+    // __item = 渲染项（组卡含 _grp），__orig = 原始成员/组项快照，
+    // agg-ui 的 memberOf 用 __item 反查组或成员引用。
+    card.__item = item;
+    card.__orig = origItem;
+    if (V.aggUi) {
+      card.addEventListener('contextmenu', function (e) {
+        e.preventDefault();
+        V.aggUi.openMenu(card, item, { x: e.clientX, y: e.clientY });
+      });
+      card.addEventListener('pointerdown', function (e) {
+        V.aggUi.dragStart(card, e);
+      });
+      if (V.aggUi.isMultiActive()) V.aggUi.registerCard(card);
+    }
+
     return card;
   }
 
@@ -7417,6 +7433,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         var card = V.videoCard.create(it, { layout: layout(), blacklistMode: !!opts.blacklistMode });
         card.style.setProperty('--i', String(i % 12));
         wrap.appendChild(card);
+        // v0.6.2 聚合二期：多选激活时新卡注册选中模式
+        if (V.aggUi && V.aggUi.isMultiActive()) V.aggUi.registerCard(card);
       });
     } else if (opts.empty !== false) {
       wrap.appendChild(empty(opts.emptyText || '这里还没有内容', opts.emptyIcon || 'codicon-inbox'));
@@ -7435,6 +7453,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       var card = V.videoCard.create(it, { layout: layout(), blacklistMode: !!opts.blacklistMode });
       card.style.setProperty('--i', String((startIndex + j) % 12));
       wall.appendChild(card);
+      // v0.6.2 聚合二期：多选激活时新卡注册选中模式
+      if (V.aggUi && V.aggUi.isMultiActive()) V.aggUi.registerCard(card);
     });
   }
 
@@ -7498,6 +7518,594 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     grid: grid, appendCards: appendCards, sentinel: sentinel, empty: empty,
     layout: layout, setLayout: setLayout, toggleLayout: toggleLayout,
     onLayoutChange: onLayoutChange, updateChars: updateChars,
+  };
+})();
+
+
+/* ===== src/components/agg-ui.js ===== */
+
+/* ============================================================
+ * agg-ui — 视频聚合二期交互（v0.6.2）
+ *   右键菜单：单卡「新增为组 / 添加到组 / 多选」；组卡「添加到组」
+ *   多选模式：「新增为一组 / 新增为多组 / 添加到组 / 取消」
+ *   拖拽合并（长按 400ms）：单+单→建组弹窗选标题封面、视频↔组→直接并入、
+ *     组+组→合并弹窗选标题封面
+ *   组选择弹窗（搜索 + 新建组）
+ *   详情页工具：解除聚合（拆出当前源）、成员片段/完整版三态标记
+ * 依赖（运行时引用）：V.aggregations / V.router / V.toast / V.utils
+ * ============================================================ */
+(function () {
+  'use strict';
+  var V = window.VShell = window.VShell || {};
+
+  /* ---------------- 通用 ---------------- */
+  function isGrpId(id) { return typeof id === 'string' && /^grp:/.test(id); }
+
+  /** 渲染项 → 成员引用：组卡（_grp / grp: id）→ 组对象；单卡 → {src,id,title,pic,sourceId} */
+  function memberOf(item) {
+    if (!item || !V.aggregations) return null;
+    if (item._grp || isGrpId(item.id)) return V.aggregations.getGroup(item.id) || null;
+    return {
+      src: item.sourceId || null,
+      id: item.id,
+      title: item.title,
+      pic: item.pic || item.cover || '',
+      sourceId: item.sourceId || null,
+    };
+  }
+  function isGrp(m) { return !!m && isGrpId(m.id); }
+
+  function toast(msg, ok) {
+    if (!V.toast) return;
+    if (ok) V.toast.ok(msg); else V.toast.info(msg);
+  }
+
+  /** 操作完成后刷新当前页（router.nav 同 hash → emit 重触发渲染） */
+  function refresh() {
+    closeMenu();
+    exitMultiSelect();
+    try { V.router.nav(location.hash); } catch (e) { /* noop */ }
+  }
+
+  /* ---------------- 右键菜单 ---------------- */
+  var ctx = { menu: null, card: null, onDocDown: null, onEsc: null, onWheel: null };
+
+  function closeMenu() {
+    if (!ctx.menu) return;
+    ctx.menu.remove();
+    ctx.menu = null;
+    ctx.card = null;
+    if (ctx.onDocDown) window.removeEventListener('pointerdown', ctx.onDocDown, true);
+    if (ctx.onEsc) window.removeEventListener('keydown', ctx.onEsc);
+    if (ctx.onWheel) window.removeEventListener('wheel', ctx.onWheel);
+    ctx.onDocDown = ctx.onEsc = ctx.onWheel = null;
+  }
+
+  function openMenu(card, item, pos) {
+    if (!V.aggregations) return;
+    closeMenu();
+    var m = memberOf(item);
+    if (!m) return;
+    ctx.card = card;
+    var host = document.querySelector('.vshell-app') || document.body;
+    var menu = V.utils.el('div', { className: 'vshell-ctx-menu' });
+    function itemBtn(label, icon, fn) {
+      menu.appendChild(V.utils.el('button', {
+        className: 'vshell-ctx-item',
+        type: 'button',
+        onclick: function (e) { e.stopPropagation(); fn(); },
+      }, [
+        V.utils.el('span', { className: 'codicon ' + icon + ' vshell-ctx-icon' }),
+        V.utils.el('span', { className: 'vshell-ctx-label' }, label),
+      ]));
+    }
+    if (isGrp(m)) {
+      itemBtn('添加到组', 'codicon-list-unordered', function () { closeMenu(); pickGroup([m]); });
+    } else {
+      itemBtn('新增为组', 'codicon-add', function () { closeMenu(); createGroupDlg([m]); });
+      itemBtn('添加到组', 'codicon-list-unordered', function () { closeMenu(); pickGroup([m]); });
+      itemBtn('多选', 'codicon-check-all', function () { closeMenu(); startMultiSelect(); });
+    }
+    host.appendChild(menu);
+    ctx.menu = menu;
+    var w = menu.offsetWidth || 180;
+    var h = menu.offsetHeight || 120;
+    var x = Math.max(4, Math.min((pos && pos.x) || 100, window.innerWidth - w - 8));
+    var y = Math.max(4, Math.min((pos && pos.y) || 100, window.innerHeight - h - 8));
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    ctx.onDocDown = function (e) {
+      if (ctx.menu && !ctx.menu.contains(e.target)) closeMenu();
+    };
+    ctx.onEsc = function (e) { if (e.key === 'Escape') closeMenu(); };
+    ctx.onWheel = closeMenu;
+    window.addEventListener('pointerdown', ctx.onDocDown, true);
+    window.addEventListener('keydown', ctx.onEsc);
+    window.addEventListener('wheel', ctx.onWheel);
+  }
+
+  /* ---------------- 通用弹窗 ---------------- */
+  function modal(title, body, footBtns, cls) {
+    var fsEl = document.fullscreenElement
+      || document.querySelector('.vshell-feed.is-feed-fullscreen-sim');
+    var host = fsEl || document.querySelector('.vshell-app') || document.body;
+    var overlay = V.utils.el('div', {
+      className: 'vshell-modal-backdrop vshell-picker-backdrop' + (cls ? ' ' + cls : ''),
+    });
+    var box = V.utils.el('div', { className: 'vshell-modal vshell-agg-modal' });
+    box.appendChild(V.utils.el('div', { className: 'vshell-modal-title-row' }, [
+      V.utils.el('div', { className: 'vshell-modal-title' }, title),
+    ]));
+    box.appendChild(body);
+    if (footBtns && footBtns.length) {
+      box.appendChild(V.utils.el('div', { className: 'vshell-tag-foot' }, footBtns));
+    }
+    overlay.appendChild(box);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    host.appendChild(overlay);
+    function close() { overlay.remove(); }
+    return { overlay: overlay, box: box, close: close };
+  }
+  function footBtn(label, cls, onClick) {
+    return V.utils.el('button', { className: 'vshell-btn ' + cls, type: 'button', onclick: onClick }, label);
+  }
+  function coverEl(url, cls) {
+    if (url) {
+      return V.utils.el('span', { className: cls }, [
+        V.utils.el('img', { src: url, alt: '', draggable: 'false' }),
+      ]);
+    }
+    return V.utils.el('span', { className: cls + ' vshell-agg-cand-cover-empty' }, [
+      V.utils.el('span', { className: 'codicon codicon-file-media' }),
+    ]);
+  }
+
+  /* ---------------- 建组弹窗（≥2 成员选标题封面；1 成员直接建） ---------------- */
+  function createGroupDlg(members) {
+    members = (members || []).filter(Boolean);
+    if (!members.length) return;
+    var A = V.aggregations;
+    if (members.length === 1) {
+      var m0 = members[0];
+      if (isGrp(m0)) return;
+      var gid = A.createGroup([{ src: m0.src, id: m0.id }], {
+        title: m0.title || m0.id,
+        cover: m0.pic || '',
+        coverSrc: m0.sourceId || m0.src,
+        auto: false,
+      });
+      if (gid) { toast('已创建组：' + (m0.title || ''), true); refresh(); }
+      return;
+    }
+    // ≥2：弹窗选标题封面（默认质量优：有封面 > 标题长）
+    var cands = members.map(function (m, i) {
+      return { m: m, i: i, sc: (m.pic ? 500 : 0) + Math.min(1000, (m.title || '').length) };
+    });
+    cands.sort(function (a, b) { return b.sc - a.sc; });
+    var defIdx = cands[0].i;
+    var body = V.utils.el('div', { className: 'vshell-agg-cand' });
+    var list = V.utils.el('div', { className: 'vshell-agg-cand-list' });
+    var rows = [];
+    members.forEach(function (m, i) {
+      var row = V.utils.el('label', {
+        className: 'vshell-agg-cand-row' + (i === defIdx ? ' is-on' : ''),
+      }, [
+        V.utils.el('input', {
+          type: 'radio', name: 'aggcand', className: 'vshell-agg-cand-radio',
+          checked: i === defIdx ? true : undefined,
+        }),
+        coverEl(m.pic, 'vshell-agg-cand-cover'),
+        V.utils.el('span', { className: 'vshell-agg-cand-info' }, [
+          V.utils.el('span', { className: 'vshell-agg-cand-title' }, m.title || '（无标题）'),
+          V.utils.el('span', { className: 'vshell-agg-cand-src' }, m.sourceId || m.src || ''),
+        ]),
+      ]);
+      row.addEventListener('click', function () {
+        rows.forEach(function (r) { r.classList.remove('is-on'); });
+        row.classList.add('is-on');
+      });
+      rows.push(row);
+      list.appendChild(row);
+    });
+    var cust = V.utils.el('input', {
+      className: 'vshell-agg-cand-custom', type: 'text',
+      placeholder: '自定义组标题（留空用所选视频标题）',
+    });
+    body.appendChild(list);
+    body.appendChild(cust);
+    var dlg = modal('选择组标题与封面', body, [
+      footBtn('取消', 'vshell-btn-secondary', function () { dlg.close(); }),
+      footBtn('创建组', 'vshell-btn-primary', function () {
+        var sel = defIdx;
+        rows.forEach(function (r, i) { if (r.classList.contains('is-on')) sel = i; });
+        var m = members[sel];
+        var gid = A.createGroup(members.map(function (x) { return { src: x.src, id: x.id }; }), {
+          title: cust.value.trim() || m.title || m.id,
+          cover: m.pic || '',
+          coverSrc: m.sourceId || m.src,
+          auto: false,
+        });
+        dlg.close();
+        if (gid) { toast('已创建组：' + (cust.value.trim() || m.title || ''), true); refresh(); }
+      }),
+    ]);
+  }
+
+  /* ---------------- 合并组弹窗（选标题封面） ---------------- */
+  function mergeGroupsDlg(g1, g2) {
+    if (!g1 || !g2 || g1.id === g2.id) return;
+    var cands = [g1, g2];
+    var body = V.utils.el('div', { className: 'vshell-agg-cand' });
+    var list = V.utils.el('div', { className: 'vshell-agg-cand-list' });
+    var rows = [];
+    cands.forEach(function (g, i) {
+      var row = V.utils.el('label', {
+        className: 'vshell-agg-cand-row' + (i === 0 ? ' is-on' : ''),
+      }, [
+        V.utils.el('input', {
+          type: 'radio', name: 'aggmerge', className: 'vshell-agg-cand-radio',
+          checked: i === 0 ? true : undefined,
+        }),
+        coverEl(g.cover, 'vshell-agg-cand-cover'),
+        V.utils.el('span', { className: 'vshell-agg-cand-info' }, [
+          V.utils.el('span', { className: 'vshell-agg-cand-title' }, g.title || '（未命名组）'),
+          V.utils.el('span', { className: 'vshell-agg-cand-src' },
+            (g.members || []).length + ' 个成员'),
+        ]),
+      ]);
+      row.addEventListener('click', function () {
+        rows.forEach(function (r) { r.classList.remove('is-on'); });
+        row.classList.add('is-on');
+      });
+      rows.push(row);
+      list.appendChild(row);
+    });
+    var cust = V.utils.el('input', {
+      className: 'vshell-agg-cand-custom', type: 'text',
+      placeholder: '自定义组标题（留空用所选组标题）',
+    });
+    body.appendChild(list);
+    body.appendChild(cust);
+    var dlg = modal('合并组：选择标题与封面', body, [
+      footBtn('取消', 'vshell-btn-secondary', function () { dlg.close(); }),
+      footBtn('合并', 'vshell-btn-primary', function () {
+        var sel = 0;
+        rows.forEach(function (r, i) { if (r.classList.contains('is-on')) sel = i; });
+        var g = cands[sel];
+        var ok = V.aggregations.mergeGroups(g1.id, g2.id, {
+          title: cust.value.trim() || g.title,
+          cover: g.cover || '',
+          coverSrc: g.coverSrc || '',
+        });
+        dlg.close();
+        if (ok) { toast('已合并组', true); refresh(); }
+      }),
+    ]);
+  }
+
+  /* ---------------- 组选择弹窗（添加到组） ---------------- */
+  function pickGroup(items) {
+    items = (items || []).filter(Boolean);
+    if (!items.length) return;
+    var A = V.aggregations;
+    var groups = A.getGroups() || {};
+    var selfIds = {};
+    items.forEach(function (m) { if (isGrp(m)) selfIds[m.id] = true; });
+    var ids = Object.keys(groups).filter(function (id) { return !selfIds[id]; });
+
+    var body = V.utils.el('div', { className: 'vshell-agg-pick' });
+    var search = V.utils.el('input', {
+      className: 'vshell-agg-pick-search', type: 'text', placeholder: '搜索组…',
+    });
+    var list = V.utils.el('div', { className: 'vshell-agg-pick-list' });
+    body.appendChild(search);
+    body.appendChild(list);
+
+    function doPick(g) {
+      dlg.close();
+      var grps = items.filter(isGrp);
+      var vids = items.filter(function (m) { return !isGrp(m); });
+      var ok = false;
+      vids.forEach(function (m) {
+        if (A.addToGroup(g.id, { src: m.src, id: m.id })) ok = true;
+      });
+      if (grps.length) {
+        // 组并入目标组：弹窗选标题封面（决策 5）
+        mergeGroupsDlg(grps[0], g);
+        return;
+      }
+      if (ok) { toast('已并入组：' + (g.title || ''), true); refresh(); }
+    }
+    function render(q) {
+      list.innerHTML = '';
+      var vis = ids.filter(function (id) {
+        return !q || ((groups[id].title || '').indexOf(q) >= 0);
+      });
+      if (!vis.length) {
+        list.appendChild(V.utils.el('div', { className: 'vshell-agg-pick-empty' }, '没有匹配的组（可新建一个）'));
+        return;
+      }
+      vis.forEach(function (id) {
+        var g = groups[id];
+        list.appendChild(V.utils.el('button', {
+          className: 'vshell-agg-pick-row', type: 'button',
+          onclick: function () { doPick(g); },
+        }, [
+          coverEl(g.cover, 'vshell-agg-pick-cover'),
+          V.utils.el('span', { className: 'vshell-agg-pick-info' }, [
+            V.utils.el('span', { className: 'vshell-agg-pick-title' }, g.title || '（未命名组）'),
+            V.utils.el('span', { className: 'vshell-agg-pick-count' },
+              (g.members || []).length + ' 个成员'),
+          ]),
+        ]));
+      });
+    }
+    search.addEventListener('input', function () { render(search.value.trim()); });
+
+    var dlg = modal('添加到组', body, [
+      footBtn('新建组', 'vshell-btn-secondary', function () {
+        dlg.close();
+        if (items.some(isGrp)) { toast('组只能并入已有组'); return; }
+        createGroupDlg(items);
+      }),
+      footBtn('取消', 'vshell-btn-secondary', function () { dlg.close(); }),
+    ]);
+    render('');
+  }
+
+  /* ---------------- 多选模式 ---------------- */
+  var multi = { active: false, bar: null, countEl: null, btns: [] };
+
+  function isMultiActive() { return multi.active; }
+
+  function registerCard(card) {
+    if (!multi.active || !card || card.__multiReg) return;
+    card.__multiReg = true;
+    card.__multiOnClick = function (e) {
+      if (!multi.active) return;
+      var t = e.target;
+      if (t && t.closest && t.closest('button')) return;   // 按钮区不切换选中
+      e.preventDefault();
+      e.stopPropagation();
+      toggleCard(card);
+    };
+    card.addEventListener('click', card.__multiOnClick, true);
+  }
+  function unregisterCard(card) {
+    if (!card || !card.__multiReg) return;
+    card.__multiReg = false;
+    card.removeEventListener('click', card.__multiOnClick, true);
+    card.__multiOnClick = null;
+    card.classList.remove('is-multi-selecting');
+  }
+
+  function toggleCard(card) {
+    card.classList.toggle('is-multi-selecting');
+    updateBar();
+  }
+  function selectedCards() {
+    if (!multi.active) return [];
+    var out = [];
+    document.querySelectorAll('.vsc-video-card.is-multi-selecting').forEach(function (c) { out.push(c); });
+    return out;
+  }
+  function selectedMembers() {
+    return selectedCards().map(function (c) {
+      return memberOf(c.__item || c.__orig || null);
+    }).filter(Boolean);
+  }
+  function updateBar() {
+    if (!multi.bar) return;
+    var n = selectedCards().length;
+    multi.countEl.textContent = '已选 ' + n + ' 张';
+    multi.btns.forEach(function (b) {
+      b.disabled = !(n >= 1) || (b.dataset.min2 && n < 2);
+    });
+  }
+
+  function startMultiSelect() {
+    if (multi.active) return;
+    multi.active = true;
+    document.body.classList.add('vshell-multi-active');
+    document.querySelectorAll('.vsc-video-card').forEach(registerCard);
+    var bar = V.utils.el('div', { className: 'vshell-multi-bar' });
+    multi.countEl = V.utils.el('span', { className: 'vshell-multi-count' }, '已选 0 张');
+    bar.appendChild(multi.countEl);
+    multi.btns = [];
+    function mk(label, cls, min2, fn) {
+      var b = V.utils.el('button', {
+        className: 'vshell-btn ' + cls, type: 'button', disabled: 'disabled',
+        onclick: function () {
+          var ms = selectedMembers();
+          if (!ms.length) return;
+          exitMultiSelect();
+          fn(ms);
+        },
+      }, label);
+      if (min2) b.dataset.min2 = '1';
+      multi.btns.push(b);
+      bar.appendChild(b);
+    }
+    mk('新增为一组', 'vshell-btn-primary', true, function (ms) { createGroupDlg(ms); });
+    mk('新增为多组', 'vshell-btn', true, function (ms) {
+      var n = 0;
+      ms.forEach(function (m) {
+        if (V.aggregations.createGroup([{ src: m.src, id: m.id }], {
+          title: m.title || m.id, cover: m.pic || '',
+          coverSrc: m.sourceId || m.src, auto: false,
+        })) n++;
+      });
+      if (n) { toast('已创建 ' + n + ' 个组', true); refresh(); }
+    });
+    mk('添加到组', 'vshell-btn', false, function (ms) { pickGroup(ms); });
+    mk('取消', 'vshell-btn-secondary', false, function () { exitMultiSelect(); });
+    var host = document.querySelector('.vshell-app') || document.body;
+    host.appendChild(bar);
+    multi.bar = bar;
+    updateBar();
+  }
+
+  function exitMultiSelect() {
+    if (!multi.active && !multi.bar) return;
+    multi.active = false;
+    document.querySelectorAll('.vsc-video-card').forEach(unregisterCard);
+    if (multi.bar) { multi.bar.remove(); multi.bar = null; }
+    multi.countEl = null;
+    multi.btns = [];
+    document.body.classList.remove('vshell-multi-active');
+  }
+
+  /* ---------------- 长按拖拽合并 ---------------- */
+  var drag = {
+    timer: null, started: false, active: false,
+    card: null, m: null, ghost: null, target: null,
+    sx: 0, sy: 0,
+  };
+
+  function dragStart(card, e) {
+    if (multi.active || !V.aggregations) return;
+    if (e.button !== 0) return;
+    var t = e.target;
+    if (t && t.closest && t.closest('button')) return;   // 按钮上不拖拽
+    var m = memberOf(card.__item || null);
+    if (!m) return;
+    drag.card = card;
+    drag.m = m;
+    drag.sx = e.clientX; drag.sy = e.clientY;
+    drag.started = false; drag.active = false;
+    if (drag.timer) clearTimeout(drag.timer);
+    drag.timer = setTimeout(function () {
+      if (!drag.card) return;
+      drag.started = true; drag.active = true;
+      document.body.classList.add('vshell-dragging');
+      var g = V.utils.el('div', { className: 'vshell-drag-ghost' });
+      if (m.pic) {
+        g.appendChild(V.utils.el('img', { src: m.pic, alt: '', draggable: 'false' }));
+      } else {
+        g.appendChild(V.utils.el('span', { className: 'codicon codicon-file-media' }));
+      }
+      g.appendChild(V.utils.el('span', { className: 'vshell-drag-ghost-title' }, m.title || ''));
+      document.body.appendChild(g);
+      drag.ghost = g;
+      placeGhost(e.clientX, e.clientY);
+      window.addEventListener('pointermove', onDragMove, true);
+      window.addEventListener('pointerup', onDragEnd, true);
+      window.addEventListener('pointercancel', onDragCancel, true);
+    }, 400);
+    // 400ms 内松开/取消 = 普通点击
+    card.addEventListener('pointerup', onQuickUp, { once: true });
+    card.addEventListener('pointercancel', onQuickUp, { once: true });
+    function onQuickUp() {
+      if (!drag.started) { if (drag.timer) clearTimeout(drag.timer); }
+    }
+  }
+
+  function placeGhost(x, y) {
+    if (drag.ghost) {
+      drag.ghost.style.left = (x + 12) + 'px';
+      drag.ghost.style.top = (y + 12) + 'px';
+    }
+  }
+  function findTarget(x, y) {
+    var el = document.elementFromPoint(x, y);
+    while (el && el !== document.body) {
+      if (el.classList && el.classList.contains('vsc-video-card')) return el;
+      el = el.parentNode;
+    }
+    return null;
+  }
+  function onDragMove(e) {
+    if (!drag.active) return;
+    e.preventDefault();
+    placeGhost(e.clientX, e.clientY);
+    var t = findTarget(e.clientX, e.clientY);
+    if (t === drag.target) return;
+    if (drag.target) drag.target.classList.remove('is-drop-target');
+    drag.target = (t && t !== drag.card) ? t : null;
+    if (drag.target) drag.target.classList.add('is-drop-target');
+  }
+  function cancelDrag() {
+    window.removeEventListener('pointermove', onDragMove, true);
+    window.removeEventListener('pointerup', onDragEnd, true);
+    window.removeEventListener('pointercancel', onDragCancel, true);
+    if (drag.target) { drag.target.classList.remove('is-drop-target'); drag.target = null; }
+    if (drag.ghost) { drag.ghost.remove(); drag.ghost = null; }
+    document.body.classList.remove('vshell-dragging');
+    drag.active = false; drag.started = false;
+    drag.card = null; drag.m = null; drag.timer = null;
+  }
+  function onDragCancel() { cancelDrag(); }
+  function onDragEnd(e) {
+    var src = drag.m;
+    var tgtCard = drag.target;
+    cancelDrag();
+    if (!src || !tgtCard) return;
+    var tgt = memberOf(tgtCard.__item || null);
+    if (!tgt) return;
+    var srcG = isGrp(src) ? src : null;
+    var tgtG = isGrp(tgt) ? tgt : null;
+    if (srcG && tgtG) {
+      if (srcG.id !== tgtG.id) mergeGroupsDlg(srcG, tgtG);
+    } else if (srcG) {
+      addToGroupFlow(srcG.id, tgt);
+    } else if (tgtG) {
+      addToGroupFlow(tgtG.id, src);
+    } else {
+      var same = (String(src.id) === String(tgt.id)) && (src.sourceId === tgt.sourceId);
+      if (!same) createGroupDlg([src, tgt]);
+    }
+  }
+  function addToGroupFlow(gid, m) {
+    if (V.aggregations.addToGroup(gid, { src: m.src, id: m.id })) {
+      var g = V.aggregations.getGroup(gid);
+      toast('已并入组：' + ((g && g.title) || ''), true);
+      refresh();
+    } else {
+      toast('该视频已在组中');
+    }
+  }
+
+  /* ---------------- 详情页工具 ---------------- */
+  /** 解除聚合：拆出当前成员；返回剩余成员数（-1 组不存在；1=拆后仅剩 1 成员） */
+  function unmerge(gid, src, id) {
+    var A = V.aggregations;
+    var g = A.getGroup(gid);
+    if (!g) return -1;
+    if ((g.members || []).length <= 1) return 1;
+    A.removeMember(gid, src, id);
+    var g2 = A.getGroup(gid);
+    return g2 ? g2.members.length : 0;
+  }
+  /** 片段/完整版三态循环：0 默认 → 1 完整版 → 2 片段 → 0；返回新 part */
+  function markPart(gid, src, id) {
+    var A = V.aggregations;
+    var g = A.getGroup(gid);
+    if (!g) return 0;
+    var cur = 0;
+    (g.members || []).forEach(function (m) {
+      if (m.src === src && String(m.id) === String(id)) cur = m.part || 0;
+    });
+    var next = (cur + 1) % 3;
+    A.setPart(gid, src, id, next);
+    return next;
+  }
+
+  V.aggUi = {
+    openMenu: openMenu,
+    closeMenu: closeMenu,
+    memberOf: memberOf,
+    isGrp: isGrp,
+    createGroupDlg: createGroupDlg,
+    mergeGroupsDlg: mergeGroupsDlg,
+    pickGroup: pickGroup,
+    startMultiSelect: startMultiSelect,
+    exitMultiSelect: exitMultiSelect,
+    isMultiActive: isMultiActive,
+    registerCard: registerCard,
+    dragStart: dragStart,
+    unmerge: unmerge,
+    markPart: markPart,
+    refresh: refresh,
   };
 })();
 
@@ -13384,7 +13992,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     }
 
     /** v0.6.1 组详情顶部源切换器：成员 chip（源名 + 标题 + 片段/完整版徽标 +
-     *  未激活源置灰）；点击 → loadMember。标题加载成功后 updateChip 回填 */
+     *  未激活源置灰）；点击 → loadMember。标题加载成功后 updateChip 回填
+     *  v0.6.2 二期：chip 尾部片段/完整版三态按钮（点击循环 默认→完整版→片段→默认）+
+     *  组工具行（解除聚合：拆出当前源成员） */
     function renderGroupBar(grpObj) {
       var bar = V.utils.el('div', { className: 'vshell-group-bar' });
       var ordered = V.aggregations.orderMembers(grpObj.id);
@@ -13399,6 +14009,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           && (!V.multisource || V.multisource.activeSources().indexOf(m.src) < 0);
         var titleEl = V.utils.el('span', { className: 'vshell-group-chip-title' },
           m.src + ':' + m.id);
+        var chipObj = { m: m, titleEl: titleEl };
         var chip = V.utils.el('button', {
           className: 'vshell-group-chip' + (inactive ? ' is-inactive' : ''),
           type: 'button',
@@ -13406,20 +14017,65 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         }, [
           V.utils.el('span', { className: 'vshell-group-chip-src' }, nm),
           titleEl,
-          m.part === 1
-            ? V.utils.el('span', { className: 'vshell-group-chip-part is-full' }, '完整版')
-            : (m.part === 2
-                ? V.utils.el('span', { className: 'vshell-group-chip-part' }, '片段')
-                : null),
         ]);
+        // 片段/完整版三态按钮（v0.6.2；播放排序：完整版优先）
+        var partBtn = V.utils.el('button', {
+          className: 'vshell-group-chip-partbtn',
+          type: 'button',
+          title: '标记片段/完整版（点击循环：默认→完整版→片段）',
+        }, [V.utils.el('span', { className: 'codicon codicon-circle-outline' })]);
+        partBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var next = V.aggUi.markPart(grpObj.id, m.src, m.id);
+          refreshChipPart(chipObj, next);
+        });
+        chipObj.partBtn = partBtn;
+        chip.appendChild(partBtn);
+        refreshChipPart(chipObj, m.part || 0);
         chip.addEventListener('click', function () {
           loadMember(m.src, m.id);
         });
-        chips.push({ chip: chip, titleEl: titleEl, m: m });
+        chips.push(chipObj);
+        chipObj.chip = chip;
         bar.appendChild(chip);
       });
       page.appendChild(bar);
+      // v0.6.2 解除聚合：拆出当前播放成员（组>1 时显示；src/id 为闭包当前成员）
+      if (grpObj.members.length > 1) {
+        var tools = V.utils.el('div', { className: 'vshell-group-tools' }, [
+          V.utils.el('button', {
+            className: 'vshell-btn vshell-btn-secondary',
+            type: 'button',
+            onclick: function () {
+              if (!V.aggUi) return;
+              var n = V.aggUi.unmerge(grpObj.id, src, id);
+              if (n < 0) return;
+              V.toast.ok(n <= 1 ? '组只剩 1 个成员，已解除聚合' : '已从组中拆出该视频');
+              V.router.nav(location.hash);   // 重渲染组详情（重新选默认成员）
+            },
+          }, '解除聚合'),
+        ]);
+        page.appendChild(tools);
+      }
       V.__groupChips = chips;
+    }
+    /** 更新成员 chip 的片段/完整版徽标与三态按钮（v0.6.2） */
+    function refreshChipPart(chipObj, part) {
+      if (!chipObj || !chipObj.chip) return;
+      chipObj.m.part = part;
+      chipObj.chip.querySelectorAll('.vshell-group-chip-part').forEach(function (p) { p.remove(); });
+      var icon = chipObj.partBtn.querySelector('.codicon');
+      if (part === 1) {
+        chipObj.chip.appendChild(
+          V.utils.el('span', { className: 'vshell-group-chip-part is-full' }, '完整版'));
+        if (icon) icon.className = 'codicon codicon-check';
+      } else if (part === 2) {
+        chipObj.chip.appendChild(
+          V.utils.el('span', { className: 'vshell-group-chip-part' }, '片段'));
+        if (icon) icon.className = 'codicon codicon-remove';
+      } else {
+        if (icon) icon.className = 'codicon codicon-circle-outline';
+      }
     }
     /** 回填当前成员 chip 标题 + 激活态（render 后调用） */
     function updateChip(mSrc, mId, title) {
@@ -22175,6 +22831,310 @@ html.vshell::-webkit-scrollbar {
 .vshell .vshell-sniff-dl:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* ===== v0.6.2 聚合二期交互：右键菜单 / 多选 / 拖拽 / 组选择弹窗 ===== */
+
+/* 右键菜单 */
+.vshell-ctx-menu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 168px;
+  padding: 4px;
+  background: var(--vscode-menu-background, #252526);
+  border: 1px solid var(--vscode-menu-border, #454545);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+}
+.vshell-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--vscode-menu-foreground, #cccccc);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.vshell-ctx-item:hover {
+  background: var(--vscode-menu-selectionBackground, #094771);
+  color: var(--vscode-menu-selectionForeground, #ffffff);
+}
+.vshell-ctx-icon { font-size: 14px; flex: none; }
+
+/* 多选模式：卡片选中态（card 需定位上下文，勾选角标 absolute） */
+.vsc-video-card { position: relative; }
+.vsc-video-card.is-multi-selecting {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+.vsc-video-card.is-multi-selecting::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--vscode-focusBorder, #007fd4);
+  z-index: 5;
+}
+.vsc-video-card.is-multi-selecting::before {
+  content: '\\2713';
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 6;
+}
+/* 多选底部浮条 */
+.vshell-multi-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 2900;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+}
+.vshell-multi-count {
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+  margin-right: 4px;
+}
+.vshell-multi-bar .vshell-btn { padding: 3px 10px; font-size: 12px; }
+
+/* 长按拖拽：ghost + 目标高亮 */
+.vshell-drag-ghost {
+  position: fixed;
+  z-index: 3200;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 280px;
+  padding: 6px 10px;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-focusBorder, #007fd4);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  opacity: 0.95;
+  transform: rotate(2deg);
+}
+.vshell-drag-ghost img,
+.vshell-drag-ghost .codicon {
+  width: 40px;
+  height: 26px;
+  object-fit: cover;
+  border-radius: 3px;
+  flex: none;
+}
+.vshell-drag-ghost-title {
+  font-size: 12px;
+  color: var(--vscode-foreground, #cccccc);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vsc-video-card.is-drop-target {
+  outline: 2px dashed var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+body.vshell-dragging,
+body.vshell-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+body.vshell-dragging a { pointer-events: none; }
+
+/* 组选择 / 建组 / 合并弹窗 */
+.vshell-agg-modal { width: 480px; max-width: 92vw; }
+.vshell-agg-pick-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  padding: 5px 8px;
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #cccccc);
+  border: 1px solid var(--vscode-input-border, #3c3c3c);
+  border-radius: 4px;
+  font-size: 13px;
+}
+.vshell-agg-pick-list {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vshell-agg-pick-empty {
+  padding: 16px 8px;
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+  font-size: 13px;
+  text-align: center;
+}
+.vshell-agg-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--vscode-foreground, #cccccc);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.vshell-agg-pick-row:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+.vshell-agg-pick-cover {
+  width: 56px;
+  height: 36px;
+  flex: none;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #2a2a2a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6a6a6a;
+}
+.vshell-agg-pick-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.vshell-agg-pick-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.vshell-agg-pick-title {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vshell-agg-pick-count {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+}
+.vshell-agg-cand-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.vshell-agg-cand-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.vshell-agg-cand-row.is-on {
+  border-color: var(--vscode-focusBorder, #007fd4);
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+.vshell-agg-cand-cover {
+  width: 72px;
+  height: 44px;
+  flex: none;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #2a2a2a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6a6a6a;
+}
+.vshell-agg-cand-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.vshell-agg-cand-radio { accent-color: var(--vscode-focusBorder, #007fd4); }
+.vshell-agg-cand-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.vshell-agg-cand-title {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vshell-agg-cand-src {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+}
+.vshell-agg-cand-custom {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 10px;
+  padding: 5px 8px;
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #cccccc);
+  border: 1px solid var(--vscode-input-border, #3c3c3c);
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+/* 组详情：成员 chip 片段按钮 + 工具行 */
+.vshell-group-chip-partbtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin-left: 2px;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+  cursor: pointer;
+  font-size: 12px;
+}
+.vshell-group-chip-partbtn:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+  color: var(--vscode-foreground, #cccccc);
+}
+.vshell-group-chip-partbtn .codicon { font-size: 12px; }
+.vshell-group-tools {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 16px 8px;
+}
+.vshell-group-tools .vshell-btn {
+  padding: 3px 10px;
+  font-size: 12px;
 }
 
 /* ============================================================

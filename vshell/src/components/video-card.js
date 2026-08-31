@@ -629,6 +629,22 @@
       V.aggregations.scheduleScan(origItem);
     }
 
+    // v0.6.2 聚合二期：交互代理——右键菜单 / 长按拖拽 / 多选。
+    // __item = 渲染项（组卡含 _grp），__orig = 原始成员/组项快照，
+    // agg-ui 的 memberOf 用 __item 反查组或成员引用。
+    card.__item = item;
+    card.__orig = origItem;
+    if (V.aggUi) {
+      card.addEventListener('contextmenu', function (e) {
+        e.preventDefault();
+        V.aggUi.openMenu(card, item, { x: e.clientX, y: e.clientY });
+      });
+      card.addEventListener('pointerdown', function (e) {
+        V.aggUi.dragStart(card, e);
+      });
+      if (V.aggUi.isMultiActive()) V.aggUi.registerCard(card);
+    }
+
     return card;
   }
 

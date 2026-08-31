@@ -171,7 +171,9 @@
     }
 
     /** v0.6.1 组详情顶部源切换器：成员 chip（源名 + 标题 + 片段/完整版徽标 +
-     *  未激活源置灰）；点击 → loadMember。标题加载成功后 updateChip 回填 */
+     *  未激活源置灰）；点击 → loadMember。标题加载成功后 updateChip 回填
+     *  v0.6.2 二期：chip 尾部片段/完整版三态按钮（点击循环 默认→完整版→片段→默认）+
+     *  组工具行（解除聚合：拆出当前源成员） */
     function renderGroupBar(grpObj) {
       var bar = V.utils.el('div', { className: 'vshell-group-bar' });
       var ordered = V.aggregations.orderMembers(grpObj.id);
@@ -186,6 +188,7 @@
           && (!V.multisource || V.multisource.activeSources().indexOf(m.src) < 0);
         var titleEl = V.utils.el('span', { className: 'vshell-group-chip-title' },
           m.src + ':' + m.id);
+        var chipObj = { m: m, titleEl: titleEl };
         var chip = V.utils.el('button', {
           className: 'vshell-group-chip' + (inactive ? ' is-inactive' : ''),
           type: 'button',
@@ -193,20 +196,65 @@
         }, [
           V.utils.el('span', { className: 'vshell-group-chip-src' }, nm),
           titleEl,
-          m.part === 1
-            ? V.utils.el('span', { className: 'vshell-group-chip-part is-full' }, '完整版')
-            : (m.part === 2
-                ? V.utils.el('span', { className: 'vshell-group-chip-part' }, '片段')
-                : null),
         ]);
+        // 片段/完整版三态按钮（v0.6.2；播放排序：完整版优先）
+        var partBtn = V.utils.el('button', {
+          className: 'vshell-group-chip-partbtn',
+          type: 'button',
+          title: '标记片段/完整版（点击循环：默认→完整版→片段）',
+        }, [V.utils.el('span', { className: 'codicon codicon-circle-outline' })]);
+        partBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var next = V.aggUi.markPart(grpObj.id, m.src, m.id);
+          refreshChipPart(chipObj, next);
+        });
+        chipObj.partBtn = partBtn;
+        chip.appendChild(partBtn);
+        refreshChipPart(chipObj, m.part || 0);
         chip.addEventListener('click', function () {
           loadMember(m.src, m.id);
         });
-        chips.push({ chip: chip, titleEl: titleEl, m: m });
+        chips.push(chipObj);
+        chipObj.chip = chip;
         bar.appendChild(chip);
       });
       page.appendChild(bar);
+      // v0.6.2 解除聚合：拆出当前播放成员（组>1 时显示；src/id 为闭包当前成员）
+      if (grpObj.members.length > 1) {
+        var tools = V.utils.el('div', { className: 'vshell-group-tools' }, [
+          V.utils.el('button', {
+            className: 'vshell-btn vshell-btn-secondary',
+            type: 'button',
+            onclick: function () {
+              if (!V.aggUi) return;
+              var n = V.aggUi.unmerge(grpObj.id, src, id);
+              if (n < 0) return;
+              V.toast.ok(n <= 1 ? '组只剩 1 个成员，已解除聚合' : '已从组中拆出该视频');
+              V.router.nav(location.hash);   // 重渲染组详情（重新选默认成员）
+            },
+          }, '解除聚合'),
+        ]);
+        page.appendChild(tools);
+      }
       V.__groupChips = chips;
+    }
+    /** 更新成员 chip 的片段/完整版徽标与三态按钮（v0.6.2） */
+    function refreshChipPart(chipObj, part) {
+      if (!chipObj || !chipObj.chip) return;
+      chipObj.m.part = part;
+      chipObj.chip.querySelectorAll('.vshell-group-chip-part').forEach(function (p) { p.remove(); });
+      var icon = chipObj.partBtn.querySelector('.codicon');
+      if (part === 1) {
+        chipObj.chip.appendChild(
+          V.utils.el('span', { className: 'vshell-group-chip-part is-full' }, '完整版'));
+        if (icon) icon.className = 'codicon codicon-check';
+      } else if (part === 2) {
+        chipObj.chip.appendChild(
+          V.utils.el('span', { className: 'vshell-group-chip-part' }, '片段'));
+        if (icon) icon.className = 'codicon codicon-remove';
+      } else {
+        if (icon) icon.className = 'codicon codicon-circle-outline';
+      }
     }
     /** 回填当前成员 chip 标题 + 激活态（render 后调用） */
     function updateChip(mSrc, mId, title) {

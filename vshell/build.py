@@ -52,6 +52,7 @@ JS_FILES = [
     "components/char-picker.js",
     "components/video-card.js",
     "components/wall.js",
+    "components/agg-ui.js",  # v0.6.2 聚合二期：右键菜单/多选/拖拽合并/组选择弹窗
     "core/source-feed.js",   # v0.6.0 用户需求：数据源层独立预取队列（增量拉取+缓存分片+相对路径）
     "core/multiwall.js",     # v0.5.7 用户需求：多源墙（轮转指针 + a*k 预取窗口 + 源补页）
     "components/player.js",

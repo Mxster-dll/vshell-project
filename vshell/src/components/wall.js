@@ -48,6 +48,8 @@
         var card = V.videoCard.create(it, { layout: layout(), blacklistMode: !!opts.blacklistMode });
         card.style.setProperty('--i', String(i % 12));
         wrap.appendChild(card);
+        // v0.6.2 聚合二期：多选激活时新卡注册选中模式
+        if (V.aggUi && V.aggUi.isMultiActive()) V.aggUi.registerCard(card);
       });
     } else if (opts.empty !== false) {
       wrap.appendChild(empty(opts.emptyText || '这里还没有内容', opts.emptyIcon || 'codicon-inbox'));
@@ -66,6 +68,8 @@
       var card = V.videoCard.create(it, { layout: layout(), blacklistMode: !!opts.blacklistMode });
       card.style.setProperty('--i', String((startIndex + j) % 12));
       wall.appendChild(card);
+      // v0.6.2 聚合二期：多选激活时新卡注册选中模式
+      if (V.aggUi && V.aggUi.isMultiActive()) V.aggUi.registerCard(card);
     });
   }
 
