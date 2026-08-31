@@ -224,15 +224,19 @@
 
     // 播放/弹幕（图片区左下，学 bilibili：icon + 纯数字；悬停隐藏；
     //   danmaku 缺失只显示播放；icon 用 codicon（play=播放三角、comment=弹幕气泡））
-    var stats = V.utils.el('span', { className: 'vsc-video-stats' }, [
+    // v0.6.26：数据源没返回播放数（view 为 null/undefined/''）→ 整个 stats 不渲染
+    // （不兜底 0，避免「没数据」伪装成「真 0」）；真 0 正常显示
+    var _st = item.stat || {};
+    var _hasView = _st.view !== undefined && _st.view !== null && _st.view !== '';
+    var stats = _hasView ? V.utils.el('span', { className: 'vsc-video-stats' }, [
       V.utils.el('span', { className: 'codicon codicon-play' }),
-      V.utils.el('span', { className: 'vsc-video-stats-num' }, V.utils.fmtCount(item.stat && item.stat.view)),
-      item.stat && item.stat.danmaku ? [
+      V.utils.el('span', { className: 'vsc-video-stats-num' }, V.utils.fmtCount(_st.view)),
+      _st.danmaku ? [
         V.utils.el('span', { className: 'vsc-video-stats-sep' }, ' · '),
         V.utils.el('span', { className: 'codicon codicon-comment' }),
-        V.utils.el('span', { className: 'vsc-video-stats-num' }, V.utils.fmtCount(item.stat.danmaku)),
+        V.utils.el('span', { className: 'vsc-video-stats-num' }, V.utils.fmtCount(_st.danmaku)),
       ] : null,
-    ]);
+    ]) : null;
 
     // 静音钮（右下，悬停浮现）
     var mute = V.utils.el('button', {
@@ -452,7 +456,7 @@
     media.appendChild(shade);
     if (placeholder) media.appendChild(placeholder);
     media.appendChild(actions);
-    media.appendChild(stats);
+    if (stats) media.appendChild(stats);
     if (cover) {
       // 封面布局：日期 + 时长徽章 → 右下角一排（日期在时长左侧，用户需求）
       var dateEl = V.utils.el('span', { className: 'vsc-video-cover-date' },

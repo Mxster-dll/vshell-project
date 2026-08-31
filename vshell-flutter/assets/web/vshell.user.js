@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.25
+// @version      0.6.26
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.25';
+window.VShell.version = '0.6.26';
 
 /* vshell 入口见 src/app.js */
 
@@ -7305,15 +7305,19 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
 
     // 播放/弹幕（图片区左下，学 bilibili：icon + 纯数字；悬停隐藏；
     //   danmaku 缺失只显示播放；icon 用 codicon（play=播放三角、comment=弹幕气泡））
-    var stats = V.utils.el('span', { className: 'vsc-video-stats' }, [
+    // v0.6.26：数据源没返回播放数（view 为 null/undefined/''）→ 整个 stats 不渲染
+    // （不兜底 0，避免「没数据」伪装成「真 0」）；真 0 正常显示
+    var _st = item.stat || {};
+    var _hasView = _st.view !== undefined && _st.view !== null && _st.view !== '';
+    var stats = _hasView ? V.utils.el('span', { className: 'vsc-video-stats' }, [
       V.utils.el('span', { className: 'codicon codicon-play' }),
-      V.utils.el('span', { className: 'vsc-video-stats-num' }, V.utils.fmtCount(item.stat && item.stat.view)),
-      item.stat && item.stat.danmaku ? [
+      V.utils.el('span', { className: 'vsc-video-stats-num' }, V.utils.fmtCount(_st.view)),
+      _st.danmaku ? [
         V.utils.el('span', { className: 'vsc-video-stats-sep' }, ' · '),
         V.utils.el('span', { className: 'codicon codicon-comment' }),
-        V.utils.el('span', { className: 'vsc-video-stats-num' }, V.utils.fmtCount(item.stat.danmaku)),
+        V.utils.el('span', { className: 'vsc-video-stats-num' }, V.utils.fmtCount(_st.danmaku)),
       ] : null,
-    ]);
+    ]) : null;
 
     // 静音钮（右下，悬停浮现）
     var mute = V.utils.el('button', {
@@ -7533,7 +7537,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     media.appendChild(shade);
     if (placeholder) media.appendChild(placeholder);
     media.appendChild(actions);
-    media.appendChild(stats);
+    if (stats) media.appendChild(stats);
     if (cover) {
       // 封面布局：日期 + 时长徽章 → 右下角一排（日期在时长左侧，用户需求）
       var dateEl = V.utils.el('span', { className: 'vsc-video-cover-date' },
@@ -14682,10 +14686,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         }
       }
       // v0.6.18：信息条先显示卡片播放量/弹幕/日期（无快照值 → 骨架条）
+      // v0.6.26：快照 view 为 0 也算有数据（显示「0 播放」），仅 null/undefined 才骨架
       var statsBody;
-      if (snap && (snap.view || snap.danmaku || snap.pubdate)) {
+      if (snap && (snap.view != null || snap.danmaku || snap.pubdate)) {
         statsBody = [
-          snap.view
+          snap.view != null
             ? V.utils.el('span', { className: 'vshell-detail-stats-item' },
                 V.utils.fmtCount(snap.view) + ' 播放')
             : null,
@@ -15101,9 +15106,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       main.appendChild(titleRow);
 
       // 2. 信息条：播放 · 弹幕 · 日期（· 分区标签）——v0.6.17：不再显示时长
+      // v0.6.26：数据源没返回播放数 → 播放项整项隐藏（不兜底 0）
       var stats = V.utils.el('div', { className: 'vshell-detail-stats' }, [
-        V.utils.el('span', { className: 'vshell-detail-stats-item' },
-          V.utils.fmtCount(detail.stat && detail.stat.view) + ' 播放'),
+        detail.stat && detail.stat.view !== undefined && detail.stat.view !== null && detail.stat.view !== ''
+          ? V.utils.el('span', { className: 'vshell-detail-stats-item' },
+              V.utils.fmtCount(detail.stat.view) + ' 播放')
+          : null,
         detail.stat && detail.stat.danmaku
           ? V.utils.el('span', { className: 'vshell-detail-stats-item' },
               V.utils.fmtCount(detail.stat.danmaku) + ' 弹幕')

@@ -225,10 +225,11 @@
         }
       }
       // v0.6.18：信息条先显示卡片播放量/弹幕/日期（无快照值 → 骨架条）
+      // v0.6.26：快照 view 为 0 也算有数据（显示「0 播放」），仅 null/undefined 才骨架
       var statsBody;
-      if (snap && (snap.view || snap.danmaku || snap.pubdate)) {
+      if (snap && (snap.view != null || snap.danmaku || snap.pubdate)) {
         statsBody = [
-          snap.view
+          snap.view != null
             ? V.utils.el('span', { className: 'vshell-detail-stats-item' },
                 V.utils.fmtCount(snap.view) + ' 播放')
             : null,
@@ -644,9 +645,12 @@
       main.appendChild(titleRow);
 
       // 2. 信息条：播放 · 弹幕 · 日期（· 分区标签）——v0.6.17：不再显示时长
+      // v0.6.26：数据源没返回播放数 → 播放项整项隐藏（不兜底 0）
       var stats = V.utils.el('div', { className: 'vshell-detail-stats' }, [
-        V.utils.el('span', { className: 'vshell-detail-stats-item' },
-          V.utils.fmtCount(detail.stat && detail.stat.view) + ' 播放'),
+        detail.stat && detail.stat.view !== undefined && detail.stat.view !== null && detail.stat.view !== ''
+          ? V.utils.el('span', { className: 'vshell-detail-stats-item' },
+              V.utils.fmtCount(detail.stat.view) + ' 播放')
+          : null,
         detail.stat && detail.stat.danmaku
           ? V.utils.el('span', { className: 'vshell-detail-stats-item' },
               V.utils.fmtCount(detail.stat.danmaku) + ' 弹幕')
