@@ -182,5 +182,42 @@
       if (hit) { persistSrc(sid, d); data = unionData(); V.saved.data = data; emit({ id: id, kind: 'face' }); }
       return hit;
     },
+
+    /** v0.6.4 聚合合并：成员（源,id）的收藏/待看**移动**到组（saved.grp
+     *  组级一条，组卡折叠后成员不再独立显示故移动而非复制）；
+     *  extraGids 为被合并消失的组（其组级条目并入目标组）。 */
+    absorbToGroup: function (gid, members, g, extraGids) {
+      var gd = loadSrc('grp');
+      var meta = {
+        id: gid,
+        title: (g && g.title) || gid,
+        pic: (g && g.cover) || '',
+        duration: 0,
+        pubdate: 0,
+        sourceId: 'grp',
+        addedAt: Date.now(),
+      };
+      var changed = false;
+      function moveInto(srcId, id) {
+        var d = loadSrc(srcId);
+        ['watch', 'fav'].forEach(function (kind) {
+          var i = indexOf(d[kind], id);
+          if (i === -1) return;
+          d[kind].splice(i, 1);
+          persistSrc(srcId, d);
+          if (indexOf(gd[kind], gid) === -1) gd[kind].unshift(meta);
+          changed = true;
+        });
+      }
+      (members || []).forEach(function (m) {
+        if (m && m.src && m.id) moveInto(m.src, m.id);
+      });
+      (extraGids || []).forEach(function (og) { moveInto('grp', og); });
+      if (changed) {
+        persistSrc('grp', gd);
+        invalidateUnion(); data = unionData(); V.saved.data = data;
+        emit({ id: gid, kind: 'absorb', op: 'add', src: 'grp' });
+      }
+    },
   };
 })();

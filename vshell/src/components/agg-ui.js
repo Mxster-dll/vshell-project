@@ -262,7 +262,7 @@
         coverSrc: m0.sourceId || m0.src,
         auto: false,
       });
-      if (gid) { toast('已创建组：' + (m0.title || ''), true); refreshAfterGroupOp(gid); }
+      if (gid) { toast('已创建组：' + (m0.title || ''), true); A.migrateStates(gid); refreshAfterGroupOp(gid); }
       return;
     }
     // ≥2：弹窗选标题封面（默认质量优：有封面 > 标题长）
@@ -314,7 +314,7 @@
           auto: false,
         });
         dlg.close();
-        if (gid) { toast('已创建组：' + (cust.value.trim() || m.title || ''), true); refreshAfterGroupOp(gid); }
+        if (gid) { toast('已创建组：' + (cust.value.trim() || m.title || ''), true); A.migrateStates(gid); refreshAfterGroupOp(gid); }
       }),
     ]);
   }
@@ -366,7 +366,7 @@
           coverSrc: g.coverSrc || '',
         });
         dlg.close();
-        if (ok) { toast('已合并组', true); refreshAfterMerge(g1.id, g2.id); }
+        if (ok) { toast('已合并组', true); V.aggregations.migrateStates(g1.id, [g2.id]); refreshAfterMerge(g1.id, g2.id); }
       }),
     ]);
   }
@@ -402,7 +402,7 @@
         mergeGroupsDlg(grps[0], g);
         return;
       }
-      if (ok) { toast('已并入组：' + (g.title || ''), true); refreshAfterGroupOp(g.id); }
+      if (ok) { toast('已并入组：' + (g.title || ''), true); A.migrateStates(g.id); refreshAfterGroupOp(g.id); }
     }
     function render(q) {
       list.innerHTML = '';
@@ -522,7 +522,7 @@
           title: m.title || m.id, cover: m.pic || '',
           coverSrc: m.sourceId || m.src, auto: false,
         });
-        if (gid) { n++; refreshAfterGroupOp(gid); }
+        if (gid) { n++; V.aggregations.migrateStates(gid); refreshAfterGroupOp(gid); }
       });
       if (n) toast('已创建 ' + n + ' 个组', true);
     });
@@ -648,6 +648,7 @@
     if (V.aggregations.addToGroup(gid, { src: m.src, id: m.id })) {
       var g = V.aggregations.getGroup(gid);
       toast('已并入组：' + ((g && g.title) || ''), true);
+      V.aggregations.migrateStates(gid);
       refreshAfterGroupOp(gid);
     } else {
       toast('该视频已在组中');

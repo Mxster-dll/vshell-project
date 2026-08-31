@@ -1000,5 +1000,45 @@
     toggleFollow: toggleFollow,       // v0.5.6 第十一轮：关注/取消关注
     isFollowed: isFollowed,           // v0.5.6 第十一轮：是否已关注
     onChange: onChange,
+
+    /** v0.6.4 聚合合并：成员（及被合并组 extraGids）的角色设置迁移到组
+     *  （videoChars/charConflicts 的 'grp' 源键，组 id 'grp:xxx'）；
+     *  多角色 → charConflicts 正常冲突流程（卡片红字 → 弹窗选择）。
+     *  成员原角色保留（解除聚合后可恢复）。仅手动合并路径调用。 */
+    absorbToGroup: function (gid, members, extraGids) {
+      var sid = 'grp';
+      var d = srcDataOf(sid);
+      var names = [];
+      function addName(n) {
+        if (n && typeof n === 'string' && names.indexOf(n) === -1) names.push(n);
+      }
+      function collectConflict(arr) {
+        if (Array.isArray(arr)) arr.forEach(addName);
+      }
+      if (d.videoChars[gid]) addName(d.videoChars[gid]);
+      collectConflict(d.conflicts[gid]);
+      (members || []).forEach(function (m) {
+        try { addName(srcDataOf(m.src).videoChars[String(m.id)]); } catch (e) { /* noop */ }
+      });
+      (extraGids || []).forEach(function (og) {
+        try {
+          if (d.videoChars[og]) addName(d.videoChars[og]);
+          collectConflict(d.conflicts[og]);
+        } catch (e) { /* noop */ }
+      });
+      if (!names.length) return;   // 无角色，不动
+      if (names.length === 1) {
+        d.videoChars[gid] = names[0];
+        delete d.conflicts[gid];
+      } else {
+        d.conflicts[gid] = names;
+        delete d.videoChars[gid];
+      }
+      (extraGids || []).forEach(function (og) {
+        delete d.videoChars[og];
+        delete d.conflicts[og];
+      });
+      persistSrcData(sid, d);
+    },
   };
 })();

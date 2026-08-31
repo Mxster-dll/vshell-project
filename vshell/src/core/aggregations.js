@@ -553,5 +553,25 @@
     onChange: onChange,
     notify: notify,
     count: function () { load(); return Object.keys(map.groups).length; },
+
+    /** v0.6.4 手动合并后状态迁移：成员（及被合并组 extraGids）上的
+     *  收藏/待看/黑名单/角色设置迁移到组（saved.grp/blacklist.grp/
+     *  videoChars.grp）；角色多义 → charConflicts 正常冲突流程。
+     *  仅手动合并路径（agg-ui）调用，自动扫描（doScan）不迁移。 */
+    migrateStates: function (gid, extraGids) {
+      load();
+      var g = map.groups[gid];
+      if (!g) return;
+      var members = g.members || [];
+      if (V.saved && V.saved.absorbToGroup) {
+        try { V.saved.absorbToGroup(gid, members, g, extraGids); } catch (e) { /* noop */ }
+      }
+      if (V.blacklist && V.blacklist.absorbToGroup) {
+        try { V.blacklist.absorbToGroup(gid, members, g, extraGids); } catch (e) { /* noop */ }
+      }
+      if (V.characters && V.characters.absorbToGroup) {
+        try { V.characters.absorbToGroup(gid, members, extraGids); } catch (e) { /* noop */ }
+      }
+    },
   };
 })();

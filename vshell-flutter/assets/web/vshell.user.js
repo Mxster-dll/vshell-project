@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = 'v66';
+window.VShell.version = 'v67';
 
 /* vshell 入口见 src/app.js */
 
@@ -872,6 +872,43 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       });
       if (hit) { persistSrc(sid, d); data = unionData(); V.saved.data = data; emit({ id: id, kind: 'face' }); }
       return hit;
+    },
+
+    /** v0.6.4 聚合合并：成员（源,id）的收藏/待看**移动**到组（saved.grp
+     *  组级一条，组卡折叠后成员不再独立显示故移动而非复制）；
+     *  extraGids 为被合并消失的组（其组级条目并入目标组）。 */
+    absorbToGroup: function (gid, members, g, extraGids) {
+      var gd = loadSrc('grp');
+      var meta = {
+        id: gid,
+        title: (g && g.title) || gid,
+        pic: (g && g.cover) || '',
+        duration: 0,
+        pubdate: 0,
+        sourceId: 'grp',
+        addedAt: Date.now(),
+      };
+      var changed = false;
+      function moveInto(srcId, id) {
+        var d = loadSrc(srcId);
+        ['watch', 'fav'].forEach(function (kind) {
+          var i = indexOf(d[kind], id);
+          if (i === -1) return;
+          d[kind].splice(i, 1);
+          persistSrc(srcId, d);
+          if (indexOf(gd[kind], gid) === -1) gd[kind].unshift(meta);
+          changed = true;
+        });
+      }
+      (members || []).forEach(function (m) {
+        if (m && m.src && m.id) moveInto(m.src, m.id);
+      });
+      (extraGids || []).forEach(function (og) { moveInto('grp', og); });
+      if (changed) {
+        persistSrc('grp', gd);
+        invalidateUnion(); data = unionData(); V.saved.data = data;
+        emit({ id: gid, kind: 'absorb', op: 'add', src: 'grp' });
+      }
     },
   };
 })();
@@ -2005,6 +2042,46 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     toggleFollow: toggleFollow,       // v0.5.6 第十一轮：关注/取消关注
     isFollowed: isFollowed,           // v0.5.6 第十一轮：是否已关注
     onChange: onChange,
+
+    /** v0.6.4 聚合合并：成员（及被合并组 extraGids）的角色设置迁移到组
+     *  （videoChars/charConflicts 的 'grp' 源键，组 id 'grp:xxx'）；
+     *  多角色 → charConflicts 正常冲突流程（卡片红字 → 弹窗选择）。
+     *  成员原角色保留（解除聚合后可恢复）。仅手动合并路径调用。 */
+    absorbToGroup: function (gid, members, extraGids) {
+      var sid = 'grp';
+      var d = srcDataOf(sid);
+      var names = [];
+      function addName(n) {
+        if (n && typeof n === 'string' && names.indexOf(n) === -1) names.push(n);
+      }
+      function collectConflict(arr) {
+        if (Array.isArray(arr)) arr.forEach(addName);
+      }
+      if (d.videoChars[gid]) addName(d.videoChars[gid]);
+      collectConflict(d.conflicts[gid]);
+      (members || []).forEach(function (m) {
+        try { addName(srcDataOf(m.src).videoChars[String(m.id)]); } catch (e) { /* noop */ }
+      });
+      (extraGids || []).forEach(function (og) {
+        try {
+          if (d.videoChars[og]) addName(d.videoChars[og]);
+          collectConflict(d.conflicts[og]);
+        } catch (e) { /* noop */ }
+      });
+      if (!names.length) return;   // 无角色，不动
+      if (names.length === 1) {
+        d.videoChars[gid] = names[0];
+        delete d.conflicts[gid];
+      } else {
+        d.conflicts[gid] = names;
+        delete d.videoChars[gid];
+      }
+      (extraGids || []).forEach(function (og) {
+        delete d.videoChars[og];
+        delete d.conflicts[og];
+      });
+      persistSrcData(sid, d);
+    },
   };
 })();
 
@@ -2573,6 +2650,40 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     list: all,
     filter: filter,
     onChange: onChange,
+
+    /** v0.6.4 聚合合并：成员/被合并组的黑名单**移动**到组（blacklist.grp）；
+     *  extraGids 为被合并消失的组。 */
+    absorbToGroup: function (gid, members, g, extraGids) {
+      var gl = loadSrc('grp');
+      var meta = {
+        id: gid,
+        title: (g && g.title) || gid,
+        pic: (g && g.cover) || '',
+        sourceId: 'grp',
+        ts: Date.now(),
+      };
+      var changed = false;
+      function moveFrom(srcId, id) {
+        var l = loadSrc(srcId);
+        for (var i = 0; i < l.length; i++) {
+          if (l[i].id === id) {
+            l.splice(i, 1);
+            persistSrc(srcId, l);
+            if (!isBlocked(gid, 'grp')) gl.unshift(meta);
+            changed = true;
+            return;
+          }
+        }
+      }
+      (members || []).forEach(function (m) {
+        if (m && m.src && m.id) moveFrom(m.src, m.id);
+      });
+      (extraGids || []).forEach(function (og) { moveFrom('grp', og); });
+      if (changed) {
+        persistSrc('grp', gl);
+        invalidate(); list = unionList(); notify();
+      }
+    },
   };
 })();
 
@@ -4563,6 +4674,26 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     onChange: onChange,
     notify: notify,
     count: function () { load(); return Object.keys(map.groups).length; },
+
+    /** v0.6.4 手动合并后状态迁移：成员（及被合并组 extraGids）上的
+     *  收藏/待看/黑名单/角色设置迁移到组（saved.grp/blacklist.grp/
+     *  videoChars.grp）；角色多义 → charConflicts 正常冲突流程。
+     *  仅手动合并路径（agg-ui）调用，自动扫描（doScan）不迁移。 */
+    migrateStates: function (gid, extraGids) {
+      load();
+      var g = map.groups[gid];
+      if (!g) return;
+      var members = g.members || [];
+      if (V.saved && V.saved.absorbToGroup) {
+        try { V.saved.absorbToGroup(gid, members, g, extraGids); } catch (e) { /* noop */ }
+      }
+      if (V.blacklist && V.blacklist.absorbToGroup) {
+        try { V.blacklist.absorbToGroup(gid, members, g, extraGids); } catch (e) { /* noop */ }
+      }
+      if (V.characters && V.characters.absorbToGroup) {
+        try { V.characters.absorbToGroup(gid, members, extraGids); } catch (e) { /* noop */ }
+      }
+    },
   };
 })();
 
@@ -7857,7 +7988,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         coverSrc: m0.sourceId || m0.src,
         auto: false,
       });
-      if (gid) { toast('已创建组：' + (m0.title || ''), true); refreshAfterGroupOp(gid); }
+      if (gid) { toast('已创建组：' + (m0.title || ''), true); A.migrateStates(gid); refreshAfterGroupOp(gid); }
       return;
     }
     // ≥2：弹窗选标题封面（默认质量优：有封面 > 标题长）
@@ -7909,7 +8040,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           auto: false,
         });
         dlg.close();
-        if (gid) { toast('已创建组：' + (cust.value.trim() || m.title || ''), true); refreshAfterGroupOp(gid); }
+        if (gid) { toast('已创建组：' + (cust.value.trim() || m.title || ''), true); A.migrateStates(gid); refreshAfterGroupOp(gid); }
       }),
     ]);
   }
@@ -7961,7 +8092,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           coverSrc: g.coverSrc || '',
         });
         dlg.close();
-        if (ok) { toast('已合并组', true); refreshAfterMerge(g1.id, g2.id); }
+        if (ok) { toast('已合并组', true); V.aggregations.migrateStates(g1.id, [g2.id]); refreshAfterMerge(g1.id, g2.id); }
       }),
     ]);
   }
@@ -7997,7 +8128,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         mergeGroupsDlg(grps[0], g);
         return;
       }
-      if (ok) { toast('已并入组：' + (g.title || ''), true); refreshAfterGroupOp(g.id); }
+      if (ok) { toast('已并入组：' + (g.title || ''), true); A.migrateStates(g.id); refreshAfterGroupOp(g.id); }
     }
     function render(q) {
       list.innerHTML = '';
@@ -8117,7 +8248,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           title: m.title || m.id, cover: m.pic || '',
           coverSrc: m.sourceId || m.src, auto: false,
         });
-        if (gid) { n++; refreshAfterGroupOp(gid); }
+        if (gid) { n++; V.aggregations.migrateStates(gid); refreshAfterGroupOp(gid); }
       });
       if (n) toast('已创建 ' + n + ' 个组', true);
     });
@@ -8243,6 +8374,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (V.aggregations.addToGroup(gid, { src: m.src, id: m.id })) {
       var g = V.aggregations.getGroup(gid);
       toast('已并入组：' + ((g && g.title) || ''), true);
+      V.aggregations.migrateStates(gid);
       refreshAfterGroupOp(gid);
     } else {
       toast('该视频已在组中');

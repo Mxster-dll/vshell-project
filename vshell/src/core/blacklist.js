@@ -196,5 +196,39 @@
     list: all,
     filter: filter,
     onChange: onChange,
+
+    /** v0.6.4 聚合合并：成员/被合并组的黑名单**移动**到组（blacklist.grp）；
+     *  extraGids 为被合并消失的组。 */
+    absorbToGroup: function (gid, members, g, extraGids) {
+      var gl = loadSrc('grp');
+      var meta = {
+        id: gid,
+        title: (g && g.title) || gid,
+        pic: (g && g.cover) || '',
+        sourceId: 'grp',
+        ts: Date.now(),
+      };
+      var changed = false;
+      function moveFrom(srcId, id) {
+        var l = loadSrc(srcId);
+        for (var i = 0; i < l.length; i++) {
+          if (l[i].id === id) {
+            l.splice(i, 1);
+            persistSrc(srcId, l);
+            if (!isBlocked(gid, 'grp')) gl.unshift(meta);
+            changed = true;
+            return;
+          }
+        }
+      }
+      (members || []).forEach(function (m) {
+        if (m && m.src && m.id) moveFrom(m.src, m.id);
+      });
+      (extraGids || []).forEach(function (og) { moveFrom('grp', og); });
+      if (changed) {
+        persistSrc('grp', gl);
+        invalidate(); list = unionList(); notify();
+      }
+    },
   };
 })();
