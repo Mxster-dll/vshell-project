@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.15
+// @version      0.6.16
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,9 +24,10 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.15';
+window.VShell.version = '0.6.16';
 
 /* vshell 入口见 src/app.js */
+
 
 
 
@@ -14384,12 +14385,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
             title: '复制视频标题（加载中）', 'aria-label': '复制视频标题',
           }, V.utils.el('span', { className: 'codicon codicon-copy' })),
         ]),
-        // 2. 信息条：播放量/弹幕/日期/时长 小块（真实 stats flex gap 14px）
+        // 2. 信息条：播放量/弹幕/日期/时长 一行（v0.6.16：一个条而非多个小块）
         V.utils.el('div', { className: 'vshell-detail-stats' }, [
-          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '78px' } }),
-          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '54px' } }),
-          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '90px' } }),
-          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '46px' } }),
+          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '45%' } }),
         ]),
         // 3. UP/角色行：头像圆 + 角色名条
         V.utils.el('div', { className: 'vshell-detail-up' }, [
@@ -22506,6 +22504,10 @@ html.vshell::-webkit-scrollbar {
    简介/相关推荐项），只是各元素为加载动效占位；操作行/返回按钮为真实静态组件 */
 .vshell-detail-skeleton-iso {
   padding: 0;
+  /* v0.6.16：gap 归零——间距完全由各真实类的 margin 决定（此前 gap 14px
+     与 .vshell-detail-stats/up/player-card 的 margin-top 叠加 → 间距翻倍：
+     播放量行↔头像 28px vs 真实 14px） */
+  gap: 0;
 }
 /* 标题行骨架：条 + 禁用的复制按钮（布局与真实标题行一致） */
 .vshell-detail-title-row .vshell-skeleton-line {

@@ -2715,6 +2715,10 @@
    简介/相关推荐项），只是各元素为加载动效占位；操作行/返回按钮为真实静态组件 */
 .vshell-detail-skeleton-iso {
   padding: 0;
+  /* v0.6.16：gap 归零——间距完全由各真实类的 margin 决定（此前 gap 14px
+     与 .vshell-detail-stats/up/player-card 的 margin-top 叠加 → 间距翻倍：
+     播放量行↔头像 28px vs 真实 14px） */
+  gap: 0;
 }
 /* 标题行骨架：条 + 禁用的复制按钮（布局与真实标题行一致） */
 .vshell-detail-title-row .vshell-skeleton-line {

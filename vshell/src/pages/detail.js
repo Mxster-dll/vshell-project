@@ -169,12 +169,9 @@
             title: '复制视频标题（加载中）', 'aria-label': '复制视频标题',
           }, V.utils.el('span', { className: 'codicon codicon-copy' })),
         ]),
-        // 2. 信息条：播放量/弹幕/日期/时长 小块（真实 stats flex gap 14px）
+        // 2. 信息条：播放量/弹幕/日期/时长 一行（v0.6.16：一个条而非多个小块）
         V.utils.el('div', { className: 'vshell-detail-stats' }, [
-          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '78px' } }),
-          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '54px' } }),
-          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '90px' } }),
-          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '46px' } }),
+          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '45%' } }),
         ]),
         // 3. UP/角色行：头像圆 + 角色名条
         V.utils.el('div', { className: 'vshell-detail-up' }, [
