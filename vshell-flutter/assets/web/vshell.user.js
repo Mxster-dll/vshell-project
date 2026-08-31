@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = 'v55';
+window.VShell.version = 'v56';
 
 /* vshell 入口见 src/app.js */
 
@@ -4336,6 +4336,26 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (baseUrl && /^\//.test(pic)) return Promise.resolve(baseUrl.replace(/\/+$/, '') + pic);
     return Promise.resolve(pic);
   }
+  /** v0.6.2 从墙缓存分片（vshell.wall.*.<srcId>）查该源的 baseUrl（相对路径封面拼域名用） */
+  function wallBaseUrl(srcId) {
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var lk = localStorage.key(i);
+        if (lk && lk.indexOf('vshell.wall.') === 0 && lk.indexOf('.' + srcId) === lk.length - srcId.length - 1) {
+          try {
+            var data = JSON.parse(localStorage.getItem(lk));
+            if (data && data.baseUrl) return data.baseUrl;
+          } catch (e) { /* noop */ }
+        }
+      }
+    } catch (e) { /* noop */ }
+    return '';
+  }
+  /** 成员/组封面 → 可绘制 URL（自动解密 + 拼 baseUrl）；不可用返回 null
+   *  v0.6.2 二期：建组/合并/组列表弹窗封面回填用 */
+  function picUrlOf(srcId, item) {
+    return resolvePicUrl(srcId, item, wallBaseUrl(srcId));
+  }
 
   // ---- 自动扫描（决策 8：后台增量 + 启动补扫；只并不拆）----
   /** 激活源集合（未激活源——含隐私源——数据不在视野内，禁止自动聚合） */
@@ -4499,6 +4519,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     scanCache: scanCache,
     cleanInactive: cleanInactive,
     phashOf: phashOf,
+    resolvePicUrl: resolvePicUrl,   // v0.6.2 导出：弹窗/UI 封面解析
+    picUrlOf: picUrlOf,             // v0.6.2 导出：自动查 baseUrl 的封面解析
     onChange: onChange,
     notify: notify,
     count: function () { load(); return Object.keys(map.groups).length; },
@@ -7649,15 +7671,32 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   function footBtn(label, cls, onClick) {
     return V.utils.el('button', { className: 'vshell-btn ' + cls, type: 'button', onclick: onClick }, label);
   }
-  function coverEl(url, cls) {
-    if (url) {
-      return V.utils.el('span', { className: cls }, [
-        V.utils.el('img', { src: url, alt: '', draggable: 'false' }),
-      ]);
+  /** 封面元素：完整 URL 直接显示；相对路径/加密图先占位，经
+   *  aggregations.picUrlOf（解密 + 拼 baseUrl）异步回填；加载失败回占位。
+   *  v0.6.2 二期修复：建组/合并/组列表弹窗封面此前直接 img src=原 pic，
+   *  17c 加密图与 source-feed 相对路径封面显示不出来 */
+  function coverEl(url, cls, srcId, item) {
+    var el = V.utils.el('span', { className: cls });
+    function showPlaceholder() {
+      el.innerHTML = '';
+      el.appendChild(V.utils.el('span', { className: 'codicon codicon-file-media' }));
     }
-    return V.utils.el('span', { className: cls + ' vshell-agg-cand-cover-empty' }, [
-      V.utils.el('span', { className: 'codicon codicon-file-media' }),
-    ]);
+    function showImg(u) {
+      var im = V.utils.el('img', { src: u, alt: '', draggable: 'false' });
+      im.addEventListener('error', function () { showPlaceholder(); });
+      el.innerHTML = '';
+      el.appendChild(im);
+    }
+    var isAbs = /^(https?:|blob:|data:)/.test(url || '');
+    if (url && isAbs) showImg(url);
+    else showPlaceholder();
+    if (url && srcId && item && V.aggregations && V.aggregations.picUrlOf) {
+      V.aggregations.picUrlOf(srcId, item).then(function (u) {
+        if (!u) { if (!el.querySelector('img')) showPlaceholder(); return; }
+        if (u !== url) showImg(u);
+      }).catch(function () { /* 保留原图 */ });
+    }
+    return el;
   }
 
   /* ---------------- 建组弹窗（≥2 成员选标题封面；1 成员直接建） ---------------- */
@@ -7694,7 +7733,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           type: 'radio', name: 'aggcand', className: 'vshell-agg-cand-radio',
           checked: i === defIdx ? true : undefined,
         }),
-        coverEl(m.pic, 'vshell-agg-cand-cover'),
+        coverEl(m.pic, 'vshell-agg-cand-cover', m.sourceId || m.src, m),
         V.utils.el('span', { className: 'vshell-agg-cand-info' }, [
           V.utils.el('span', { className: 'vshell-agg-cand-title' }, m.title || '（无标题）'),
           V.utils.el('span', { className: 'vshell-agg-cand-src' }, m.sourceId || m.src || ''),
@@ -7746,7 +7785,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           type: 'radio', name: 'aggmerge', className: 'vshell-agg-cand-radio',
           checked: i === 0 ? true : undefined,
         }),
-        coverEl(g.cover, 'vshell-agg-cand-cover'),
+        coverEl(g.cover, 'vshell-agg-cand-cover', g.coverSrc, { pic: g.cover }),
         V.utils.el('span', { className: 'vshell-agg-cand-info' }, [
           V.utils.el('span', { className: 'vshell-agg-cand-title' }, g.title || '（未命名组）'),
           V.utils.el('span', { className: 'vshell-agg-cand-src' },
@@ -7831,7 +7870,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           className: 'vshell-agg-pick-row', type: 'button',
           onclick: function () { doPick(g); },
         }, [
-          coverEl(g.cover, 'vshell-agg-pick-cover'),
+          coverEl(g.cover, 'vshell-agg-pick-cover', g.coverSrc, { pic: g.cover }),
           V.utils.el('span', { className: 'vshell-agg-pick-info' }, [
             V.utils.el('span', { className: 'vshell-agg-pick-title' }, g.title || '（未命名组）'),
             V.utils.el('span', { className: 'vshell-agg-pick-count' },

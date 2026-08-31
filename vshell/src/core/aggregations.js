@@ -326,6 +326,26 @@
     if (baseUrl && /^\//.test(pic)) return Promise.resolve(baseUrl.replace(/\/+$/, '') + pic);
     return Promise.resolve(pic);
   }
+  /** v0.6.2 从墙缓存分片（vshell.wall.*.<srcId>）查该源的 baseUrl（相对路径封面拼域名用） */
+  function wallBaseUrl(srcId) {
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var lk = localStorage.key(i);
+        if (lk && lk.indexOf('vshell.wall.') === 0 && lk.indexOf('.' + srcId) === lk.length - srcId.length - 1) {
+          try {
+            var data = JSON.parse(localStorage.getItem(lk));
+            if (data && data.baseUrl) return data.baseUrl;
+          } catch (e) { /* noop */ }
+        }
+      }
+    } catch (e) { /* noop */ }
+    return '';
+  }
+  /** 成员/组封面 → 可绘制 URL（自动解密 + 拼 baseUrl）；不可用返回 null
+   *  v0.6.2 二期：建组/合并/组列表弹窗封面回填用 */
+  function picUrlOf(srcId, item) {
+    return resolvePicUrl(srcId, item, wallBaseUrl(srcId));
+  }
 
   // ---- 自动扫描（决策 8：后台增量 + 启动补扫；只并不拆）----
   /** 激活源集合（未激活源——含隐私源——数据不在视野内，禁止自动聚合） */
@@ -489,6 +509,8 @@
     scanCache: scanCache,
     cleanInactive: cleanInactive,
     phashOf: phashOf,
+    resolvePicUrl: resolvePicUrl,   // v0.6.2 导出：弹窗/UI 封面解析
+    picUrlOf: picUrlOf,             // v0.6.2 导出：自动查 baseUrl 的封面解析
     onChange: onChange,
     notify: notify,
     count: function () { load(); return Object.keys(map.groups).length; },
