@@ -585,7 +585,27 @@
       document.body.classList.add('vshell-dragging');
       var g = V.utils.el('div', { className: 'vshell-drag-ghost' });
       if (m.pic) {
-        g.appendChild(V.utils.el('img', { src: m.pic, alt: '', draggable: 'false' }));
+        var gim = V.utils.el('img', { src: '', alt: '', draggable: 'false' });
+        g.appendChild(gim);
+        // v0.6.10 17c 等加密/相对路径封面：ghost 不能直接 img src=原 URL
+        //（密文乱码/相对路径无域名）——经 picUrlOf 异步解密+拼域名回填；
+        // 解密失败（17c auth_key 过期 403）→ 用成员详情刷新（新 blob）
+        if (V.aggregations && V.aggregations.picUrlOf && m.sourceId) {
+          V.aggregations.picUrlOf(m.sourceId, { pic: m.pic }).then(function (u) {
+            if (u) { gim.src = u; return; }
+            refreshGhostCover();
+          }).catch(refreshGhostCover);
+        } else {
+          gim.src = m.pic;
+        }
+        function refreshGhostCover() {
+          var ad;
+          try { ad = V.siteAdapters.adapterFor(m.sourceId); } catch (e) { ad = null; }
+          if (!ad || typeof ad.getVideoDetail !== 'function') return;
+          ad.getVideoDetail(m.id).then(function (d) {
+            if (d && d.pic) gim.src = d.pic;
+          }).catch(function () { /* 保持空图 */ });
+        }
       } else {
         g.appendChild(V.utils.el('span', { className: 'codicon codicon-file-media' }));
       }

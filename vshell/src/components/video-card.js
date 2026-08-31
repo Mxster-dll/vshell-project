@@ -154,16 +154,29 @@
     }
     // v0.6.5 组卡封面：grp.cover 可能是相对路径（kkav 需拼 baseUrl）或密文
     // URL（17c 需 XOR 解密）——统一走 aggregations.picUrlOf 解析（resolvePicUrl
-    // 自动解密 + wallBaseUrl 拼域名）；失败 → 渐变占位不黑（组 id 不能直接
-    // getVideoDetail，不做 refreshCover 兜底）。
+    // 自动解密 + wallBaseUrl 拼域名）。
+    // v0.6.10 解密失败（17c auth_key 过期 403）→ 用组**主成员**详情刷新封面
+    //（17c 详情 pic 为解密后 blob，新 auth_key），仍失败 → 渐变占位不黑。
     if (item._grp && item.pic && V.aggregations && V.aggregations.picUrlOf) {
       var _raw = item.pic;
       video.removeAttribute('poster');
       video.poster = '';
       V.aggregations.picUrlOf(item.sourceId, { pic: _raw }).then(function (u) {
         if (u) video.poster = u;
-        else showCoverPlaceholder();
-      }).catch(showCoverPlaceholder);
+        else refreshGroupCover();
+      }).catch(refreshGroupCover);
+      function refreshGroupCover() {
+        var g = V.aggregations.getGroup(item.id);
+        var ms = (g && g.members) || [];
+        if (!ms.length) { showCoverPlaceholder(); return; }
+        var ad;
+        try { ad = V.siteAdapters.adapterFor(ms[0].src); } catch (e) { ad = null; }
+        if (!ad || typeof ad.getVideoDetail !== 'function') { showCoverPlaceholder(); return; }
+        ad.getVideoDetail(ms[0].id).then(function (d) {
+          if (d && d.pic) { video.poster = d.pic; return; }
+          showCoverPlaceholder();
+        }).catch(showCoverPlaceholder);
+      }
     }
     // v0.5.6 第二十三轮：**无封面占位**——本地视频无任何封面图（截帧未
     // 完成/失败）时卡片不显示纯黑：media 上盖渐变+文件 icon 占位层（悬停

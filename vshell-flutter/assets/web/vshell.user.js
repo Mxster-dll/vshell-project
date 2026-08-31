@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.9
+// @version      0.6.10
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.9';
+window.VShell.version = '0.6.10';
 
 /* vshell 入口见 src/app.js */
 
@@ -7031,16 +7031,29 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     }
     // v0.6.5 组卡封面：grp.cover 可能是相对路径（kkav 需拼 baseUrl）或密文
     // URL（17c 需 XOR 解密）——统一走 aggregations.picUrlOf 解析（resolvePicUrl
-    // 自动解密 + wallBaseUrl 拼域名）；失败 → 渐变占位不黑（组 id 不能直接
-    // getVideoDetail，不做 refreshCover 兜底）。
+    // 自动解密 + wallBaseUrl 拼域名）。
+    // v0.6.10 解密失败（17c auth_key 过期 403）→ 用组**主成员**详情刷新封面
+    //（17c 详情 pic 为解密后 blob，新 auth_key），仍失败 → 渐变占位不黑。
     if (item._grp && item.pic && V.aggregations && V.aggregations.picUrlOf) {
       var _raw = item.pic;
       video.removeAttribute('poster');
       video.poster = '';
       V.aggregations.picUrlOf(item.sourceId, { pic: _raw }).then(function (u) {
         if (u) video.poster = u;
-        else showCoverPlaceholder();
-      }).catch(showCoverPlaceholder);
+        else refreshGroupCover();
+      }).catch(refreshGroupCover);
+      function refreshGroupCover() {
+        var g = V.aggregations.getGroup(item.id);
+        var ms = (g && g.members) || [];
+        if (!ms.length) { showCoverPlaceholder(); return; }
+        var ad;
+        try { ad = V.siteAdapters.adapterFor(ms[0].src); } catch (e) { ad = null; }
+        if (!ad || typeof ad.getVideoDetail !== 'function') { showCoverPlaceholder(); return; }
+        ad.getVideoDetail(ms[0].id).then(function (d) {
+          if (d && d.pic) { video.poster = d.pic; return; }
+          showCoverPlaceholder();
+        }).catch(showCoverPlaceholder);
+      }
     }
     // v0.5.6 第二十三轮：**无封面占位**——本地视频无任何封面图（截帧未
     // 完成/失败）时卡片不显示纯黑：media 上盖渐变+文件 icon 占位层（悬停
@@ -8325,7 +8338,27 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       document.body.classList.add('vshell-dragging');
       var g = V.utils.el('div', { className: 'vshell-drag-ghost' });
       if (m.pic) {
-        g.appendChild(V.utils.el('img', { src: m.pic, alt: '', draggable: 'false' }));
+        var gim = V.utils.el('img', { src: '', alt: '', draggable: 'false' });
+        g.appendChild(gim);
+        // v0.6.10 17c 等加密/相对路径封面：ghost 不能直接 img src=原 URL
+        //（密文乱码/相对路径无域名）——经 picUrlOf 异步解密+拼域名回填；
+        // 解密失败（17c auth_key 过期 403）→ 用成员详情刷新（新 blob）
+        if (V.aggregations && V.aggregations.picUrlOf && m.sourceId) {
+          V.aggregations.picUrlOf(m.sourceId, { pic: m.pic }).then(function (u) {
+            if (u) { gim.src = u; return; }
+            refreshGhostCover();
+          }).catch(refreshGhostCover);
+        } else {
+          gim.src = m.pic;
+        }
+        function refreshGhostCover() {
+          var ad;
+          try { ad = V.siteAdapters.adapterFor(m.sourceId); } catch (e) { ad = null; }
+          if (!ad || typeof ad.getVideoDetail !== 'function') return;
+          ad.getVideoDetail(m.id).then(function (d) {
+            if (d && d.pic) gim.src = d.pic;
+          }).catch(function () { /* 保持空图 */ });
+        }
       } else {
         g.appendChild(V.utils.el('span', { className: 'codicon codicon-file-media' }));
       }
