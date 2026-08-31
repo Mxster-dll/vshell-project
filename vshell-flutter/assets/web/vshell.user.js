@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.38
+// @version      0.6.39
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.38';
+window.VShell.version = '0.6.39';
 
 /* vshell 入口见 src/app.js */
 
@@ -23709,12 +23709,15 @@ html.vshell::-webkit-scrollbar {
 }
 /* v0.6.33 独立词限制区：限制词胶囊（与关键词胶囊同构，被限制的关键词
  * 片段高亮）+ 添加行归属胶囊 + 归属选择弹窗 */
+/* v0.6.39：高亮用 VS Code 列表搜索高亮色（list-highlightForeground 亮蓝）
+ * + 下划线——原 textBlockQuote-background 未定义导致背景失效、文字与
+ * 胶囊同色，视觉上等于没高亮 */
 .vshell-char-kwex-hl {
   font-weight: 600;
-  color: var(--vscode-foreground);
-  background: var(--vscode-textBlockQuote-background);
-  border-radius: 3px;
-  padding: 0 2px;
+  color: var(--vscode-list-highlightForeground, #2AAAFF);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--vscode-list-highlightForeground, #2AAAFF);
 }
 .vshell .vshell-char-kwex-chip:hover .vshell-st-chip-del,
 .vshell .vshell-char-kwex-chip .vshell-st-chip-del:focus-visible {
