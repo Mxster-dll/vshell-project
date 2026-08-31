@@ -24,6 +24,21 @@
   'use strict';
   var V = window.VShell = window.VShell || {};
 
+  /** v0.6.30 多源同名角色合并：角色页用**合并条目**（listAll = 激活源同名
+   *  角色的 keywords/exclusions 并集——搜索时合并关键词和排除词；各源
+   *  实际数据不修改，仅整合展示/匹配时合并）。listAll 找不到（角色在未
+   *  激活源）→ 兜底 find（单源条目）。 */
+  function mergedRole(name) {
+    if (!name) return null;
+    try {
+      var all = V.characters ? V.characters.list() : [];
+      for (var i = 0; i < all.length; i++) {
+        if (all[i] && all[i].name === name) return all[i];
+      }
+    } catch (e) { /* noop */ }
+    return V.characters && V.characters.find ? V.characters.find(name) : null;
+  }
+
   function mount(outlet, params) {
     // v0.5.6 第十三轮需求 8：全屏（抖音刷）下点击进入角色主页 → 自动
     // 退出全屏（原生 fullscreen 走 top layer，角色页会被盖在全屏之下）
@@ -33,7 +48,9 @@
     // v0.5.6 第十三轮：router 已在 parse 层统一解码 segs，这里不再
     // 二次 decode（encodeURIComponent 过的 name 若含 % 会双解码崩溃）
     var name = params.name || '';
-    var role = V.characters && V.characters.find ? V.characters.find(name) : null;
+    // v0.6.30：合并条目（多源同名角色的关键词/排除词并集——仅匹配/搜索
+    // 时合并，各源实际数据不修改）
+    var role = V.characters && V.characters.find ? mergedRole(name) : null;
     var state = { done: false };
     var page = V.utils.el('div', { className: 'vshell-page vshell-role-page' });
     outlet.appendChild(page);
@@ -571,10 +588,21 @@
               // v0.5.10：排除词过滤放进 opts.filter——source-feed 的 filter
               // 在网络拉取（pullOne）与缓存加载（loadCache）两路都会执行；
               // 否则加排除词后已缓存（关键词命中但含排除词）的视频仍会显示。
+              // v0.6.30：排除词用**合并条目**（多源同名角色排除词并集）
               var excls = role.exclusions;
               if (excls && excls.length) {
                 out = out.filter(function (it) {
                   return !exclHit(it.title, excls);
+                });
+              }
+              // v0.6.30 用户拍板：「搜索完成并筛后，为每个列表中的视频添加
+              // 当前的角色」——网络拉取与缓存加载两路都补赋（跨源：a 源
+              // 视频 → a 源角色，目标源无同名先建副本复制头像/背景/关键词/
+              // 排除词；只写 videoChars **不进** charVideos 手动段快照，
+              // 角色页「手动添加」段只含手动赋予）。assignAuto 幂等。
+              if (out.length && V.characters && V.characters.assignAuto) {
+                out.forEach(function (it) {
+                  try { V.characters.assignAuto(it, role.name); } catch (e) { /* noop */ }
                 });
               }
               return out;

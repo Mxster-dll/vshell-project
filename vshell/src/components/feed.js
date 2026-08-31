@@ -38,50 +38,38 @@
     };
   }
 
+  /** v0.6.30 多角色：返回 {els:[头像按钮...], roles:[角色...], conflict:false}——
+   *  全部角色各一个头像（点击进各自角色主页）；无角色 → + 号添加按钮 */
   function avatarFor(item) {
     var cres = (V.characters && V.characters.charFor)
       ? V.characters.charFor(item.id, item) : { kind: 'none' };
-    if (cres.kind === 'conflict') {
-      var names = cres.chars.slice();
-      var btn = V.utils.el('button', {
-        className: 'vshell-feed-avatar is-conflict',
-        type: 'button',
-        title: '匹配到多个角色：' + names.join('、') + '——点击选择',
-        'aria-label': '角色冲突，点击选择',
-      }, [V.utils.el('span', { className: 'codicon codicon-circle-slash' })]);
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        if (V.charPicker && V.charPicker.conflict) {
-          V.charPicker.conflict(item.id, item.title, names, itemMeta(item), item.sourceId);
+    var chars = cres.kind === 'char' ? (cres.chars || []) : [];
+    if (chars.length) {
+      var els = chars.map(function (c) {
+        // v0.5.3b：图片头像也可点击（v0.5.6：点击 → **角色主页**）
+        var btn = V.utils.el('button', {
+          className: 'vshell-feed-avatar',
+          type: 'button',
+          title: '角色：' + c.name + '——点击进入角色主页',
+          'aria-label': '角色主页：' + c.name,
+        });
+        var setLetter = function () {
+          btn.innerHTML = '';
+          btn.appendChild(V.utils.el('span', { className: 'vshell-feed-avatar-letter' },
+            String(c.name).charAt(0) || '?'));
+        };
+        if (c.icon) {
+          btn.appendChild(V.utils.el('img', { src: c.icon, alt: '', onerror: setLetter }));
+        } else {
+          setLetter();
         }
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          V.router.nav('/role/' + encodeURIComponent(c.name));
+        });
+        return btn;
       });
-      return { el: btn, role: null, conflict: true };
-    }
-    if (cres.kind === 'char') {
-      var c = cres.char;
-      // v0.5.3b：图片头像也可点击（用户需求"添加/冲突/图片都可点"）——
-      // v0.5.6：点击 → **角色主页**（用户需求；更改走 meta 行独立按钮）
-      var span = V.utils.el('button', {
-        className: 'vshell-feed-avatar',
-        type: 'button',
-        title: '角色：' + c.name + '——点击进入角色主页',
-        'aria-label': '角色主页：' + c.name,
-      });
-      var setLetter = function () {
-        span.innerHTML = '';
-        span.appendChild(V.utils.el('span', { className: 'vshell-feed-avatar-letter' },
-          String(c.name).charAt(0) || '?'));
-      };
-      if (c.icon) {
-        span.appendChild(V.utils.el('img', { src: c.icon, alt: '', onerror: setLetter }));
-      } else {
-        setLetter();
-      }
-      span.addEventListener('click', function (e) {
-        e.stopPropagation();
-        V.router.nav('/role/' + encodeURIComponent(c.name));
-      });
-      return { el: span, role: c, conflict: false };
+      return { els: els, roles: chars, conflict: false };
     }
     // v0.5.3：无角色 → + 号添加按钮（点击 → 添加角色弹窗）
     var addBtn = V.utils.el('button', {
@@ -96,18 +84,29 @@
         V.charPicker.edit(item.id, item.title, '添加角色', itemMeta(item), item.sourceId);
       }
     });
-    return { el: addBtn, role: null, conflict: false };
+    return { els: [addBtn], roles: [], conflict: false };
   }
 
-  /** meta 行内容（角色名/冲突文本 + v0.5.6 第十一轮：点击角色名 = 更改角色
-   *  （原独立「更改角色」按钮并入——用户需求 3）；角色名右侧 + 关注按钮；
-   *  初渲染与 updateRole 差量刷新共用（避免两处结构漂移）） */
+  /** meta 行内容（v0.6.30：全部角色名并排 + 独立「更改角色」编辑按钮；
+   *  关注按钮移除——多角色下语义模糊，关注入口保留在角色列表/角色主页。
+   *  初渲染与 updateRole 差量刷新共用） */
   function metaContent(av, item) {
     var children = [];
-    if (av.role) {
-      // 角色名 → 可点击（更改角色弹窗，同原 edit 按钮语义）
-      var nameBtn = V.utils.el('button', {
+    (av.roles || []).forEach(function (rc) {
+      children.push(V.utils.el('button', {
         className: 'vshell-feed-meta-name',
+        type: 'button',
+        title: '角色：' + rc.name + '——点击进入角色主页',
+        'aria-label': '角色主页：' + rc.name,
+        onclick: function (e) {
+          e.stopPropagation();
+          V.router.nav('/role/' + encodeURIComponent(rc.name));
+        },
+      }, rc.name));
+    });
+    if ((av.roles || []).length) {
+      children.push(V.utils.el('button', {
+        className: 'vshell-feed-meta-edit',
         type: 'button',
         title: '更改角色',
         'aria-label': '更改角色',
@@ -117,37 +116,7 @@
             V.charPicker.edit(item.id, item.title, null, itemMeta(item), item.sourceId);
           }
         },
-      }, av.role.name);
-      children.push(nameBtn);
-      // 关注按钮（+ / ✓，角色级偏好；notify 驱动 updateRole 差量刷新）
-      var followed = V.characters && V.characters.isFollowed
-        ? V.characters.isFollowed(av.role.name) : false;
-      var followBtn = V.utils.el('button', {
-        className: 'vshell-feed-follow' + (followed ? ' is-followed' : ''),
-        type: 'button',
-        title: followed ? '取消关注' : '关注角色',
-        'aria-label': followed ? '取消关注' : '关注角色',
-        onclick: function (e) {
-          e.stopPropagation();
-          // v0.5.6 第十二轮需求 3：点击 pop 动画（背景色不变，只图标切换）。
-          // **必须先**拿容器引用：toggleFollow 的 notify → updateRole 用
-          // meta.textContent='' 同步重建 meta 行——重建后旧按钮 parentNode
-          // 已被断开（closest 会失败），但容器（feed）仍是同一元素
-          var feedEl = e.target && e.target.closest ? e.target.closest('.vshell-feed') : null;
-          V.characters.toggleFollow(av.role.name);
-          var nb = feedEl ? feedEl.querySelector('.vshell-feed-follow') : null;
-          if (nb) {
-            nb.classList.remove('is-popping');
-            void nb.offsetWidth;
-            nb.classList.add('is-popping');
-          }
-        },
-      }, V.utils.el('span', {
-        className: 'codicon ' + (followed ? 'codicon-check' : 'codicon-add'),
-      }));
-      children.push(followBtn);
-    } else if (av.conflict) {
-      children.push(V.utils.el('span', { className: 'vshell-feed-meta-name' }, '角色冲突'));
+      }, V.utils.el('span', { className: 'codicon codicon-edit' })));
     }
     return children;
   }
@@ -387,7 +356,8 @@
       var av = avatarFor(item);
       var info = V.utils.el('div', { className: 'vshell-feed-info' }, [
         V.utils.el('div', { className: 'vshell-feed-head' }, [
-          av.el,
+          // v0.6.30 多角色：头像容器（全部角色并排，更新时整体替换）
+          V.utils.el('div', { className: 'vshell-feed-head-avs' }, av.els),
           V.utils.el('div', { className: 'vshell-feed-head-text' }, [
             V.utils.el('div', { className: 'vshell-feed-title-row' }, [
               V.utils.el('div', { className: 'vshell-feed-title' }, item.title || ''),
@@ -400,9 +370,7 @@
                 },
               }, V.utils.el('span', { className: 'codicon codicon-copy' })),
             ]),
-            V.utils.el('div', {
-              className: 'vshell-feed-meta' + (av.conflict ? ' is-conflict' : ''),
-            }, metaContent(av, item)),
+            V.utils.el('div', { className: 'vshell-feed-meta' }, metaContent(av, item)),
           ]),
         ]),
       ]);
@@ -595,33 +563,32 @@
         }
         return null;
       },
-      /** 头像回填/角色刷新（setFace / 角色变化后）→ 局部替换头像（不重建） */
+      /** 头像回填/角色刷新（setFace / 角色变化后）→ 局部替换头像（不重建）
+       *  v0.6.30：整体替换 .vshell-feed-head-avs 容器子节点（多角色） */
       updateFace: function (id) {
         for (var i = 0; i < slides.length; i++) {
           if (slides[i].item.id === id) {
-            var av = slides[i].root.querySelector('.vshell-feed-avatar');
+            var avHost = slides[i].root.querySelector('.vshell-feed-head-avs');
             var it = slides[i].item;
-            if (!av || !it) return;
-            var r = avatarFor(it);          // 角色/冲突/+ 号添加按钮（v0.5.3：无角色也有按钮）
-            if (r.el) av.replaceWith(r.el);
-            else av.remove();
+            if (!avHost || !it) return;
+            var r = avatarFor(it);
+            avHost.replaceChildren.apply(avHost, r.els);
             return;
           }
         }
       },
-      /** v0.5.5 用户需求：角色改动差量刷新（头像 + meta 角色名/冲突文本），
+      /** v0.5.5 用户需求：角色改动差量刷新（头像 + meta 角色名），
        *  不重建 feed（重建会回到列表第一个）。id 缺省 = 刷新全部 slide */
       updateRole: function (id) {
         for (var i = 0; i < slides.length; i++) {
           if (!id || slides[i].item.id === id) {
             var s = slides[i];
-            var av = s.root.querySelector('.vshell-feed-avatar');
-            if (!av) continue;
+            var avHost = s.root.querySelector('.vshell-feed-head-avs');
+            if (!avHost) continue;
             var r = avatarFor(s.item);
-            if (r.el) av.replaceWith(r.el);
+            avHost.replaceChildren.apply(avHost, r.els);
             var meta = s.root.querySelector('.vshell-feed-meta');
             if (meta) {
-              meta.className = 'vshell-feed-meta' + (r.conflict ? ' is-conflict' : '');
               meta.textContent = '';                     // 重建内容（含更改按钮）
               metaContent(r, s.item).forEach(function (n) { meta.appendChild(n); });
             }

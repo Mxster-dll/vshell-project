@@ -264,41 +264,34 @@
         //    无角色信息才回落骨架（圆+条）；加载完成后由 renderUpRow 替换
         (function () {
           var upBody;
-          var snapChar = null, snapConflict = null;
+          // v0.6.30 多角色：快照标题实时 charFor → 全部角色头像+名字并排
+          var snapChars = [];
           if (snap && snap.title && V.characters && V.characters.charFor) {
             var cres3 = V.characters.charFor(mId, { id: mId, title: snap.title, sourceId: mSrc });
-            if (cres3.kind === 'char') snapChar = { name: cres3.char.name, icon: cres3.char.icon || '' };
-            else if (cres3.kind === 'conflict') snapConflict = cres3.chars;
+            if (cres3.kind === 'char') {
+              snapChars = (cres3.chars || []).map(function (c) {
+                return { name: c.name, icon: c.icon || '' };
+              });
+            }
           }
-          if (snapChar || snapConflict) {
-            var upAvatarEl = V.utils.el('span', {
-              className: 'vshell-detail-up-avatar' + (snapConflict ? ' is-conflict' : ''),
-            });
-            if (snapChar) {
+          if (snapChars.length) {
+            upBody = [];
+            snapChars.forEach(function (sc) {
+              var upAvatarEl = V.utils.el('span', { className: 'vshell-detail-up-avatar' });
               var setLetter3 = function () {
                 upAvatarEl.innerHTML = '';
                 upAvatarEl.appendChild(V.utils.el('span', {
                   className: 'vshell-detail-up-avatar-letter',
-                }, String(snapChar.name).charAt(0) || '?'));
+                }, String(sc.name).charAt(0) || '?'));
               };
-              if (snapChar.icon) {
-                upAvatarEl.appendChild(V.utils.el('img', {
-                  src: snapChar.icon, alt: '', onerror: setLetter3,
-                }));
+              if (sc.icon) {
+                upAvatarEl.appendChild(V.utils.el('img', { src: sc.icon, alt: '', onerror: setLetter3 }));
               } else {
                 setLetter3();
               }
-            } else {
-              upAvatarEl.appendChild(V.utils.el('span', {
-                className: 'codicon codicon-circle-slash',
-              }));
-            }
-            upBody = [
-              upAvatarEl,
-              V.utils.el('span', {
-                className: 'vshell-detail-up-name' + (snapConflict ? ' is-conflict' : ''),
-              }, snapChar ? snapChar.name : '角色冲突'),
-            ];
+              upBody.push(upAvatarEl);
+              upBody.push(V.utils.el('span', { className: 'vshell-detail-up-name' }, sc.name));
+            });
           } else {
             upBody = [
               V.utils.el('span', { className: 'vshell-skeleton-circle' }),
@@ -691,103 +684,73 @@
       }
       function renderUpRow() {
         upRow.innerHTML = '';
-        var owner2 = detail.owner || {};
         var cres2 = (V.characters && V.characters.charFor)
           ? V.characters.charFor(id, detail) : { kind: 'none' };
-        var roleChar2 = cres2.kind === 'char' ? cres2.char : null;
-        var conflictChars2 = cres2.kind === 'conflict' ? cres2.chars : null;
-        var avatar2;
-        if (conflictChars2) {
-          avatar2 = V.utils.el('button', {
-            className: 'vshell-detail-up-avatar is-conflict',
-            type: 'button',
-            title: '匹配到多个角色：' + conflictChars2.join('、') + '——点击选择',
-            'aria-label': '角色冲突，点击选择',
-          }, [V.utils.el('span', { className: 'codicon codicon-circle-slash' })]);
-          avatar2.addEventListener('click', function () {
-            if (V.charPicker && V.charPicker.conflict) {
-              V.charPicker.conflict(id, detail.title, conflictChars2, detailMeta(), detail.sourceId);
+        // v0.6.30 多角色：每个角色一组头像+名字（点击各自进主页），
+        // 末尾独立「更改角色」铅笔按钮（单角色时代名字点击即更改）
+        var charList2 = cres2.kind === 'char' ? (cres2.chars || []) : [];
+        if (charList2.length) {
+          charList2.forEach(function (rc) {
+            var av2 = V.utils.el('button', {
+              className: 'vshell-detail-up-avatar',
+              type: 'button',
+              title: '角色：' + rc.name + '——点击进入角色主页',
+              'aria-label': '角色主页：' + rc.name,
+            });
+            av2.addEventListener('click', function () {
+              V.router.nav('/role/' + encodeURIComponent(rc.name));
+            });
+            var setLetter2 = function () {
+              av2.innerHTML = '';
+              av2.appendChild(V.utils.el('span', { className: 'vshell-detail-up-avatar-letter' },
+                String(rc.name).charAt(0) || '?'));
+            };
+            if (rc.icon) {
+              av2.appendChild(V.utils.el('img', { src: rc.icon, alt: '', onerror: setLetter2 }));
+            } else {
+              setLetter2();
             }
+            upRow.appendChild(av2);
+            upRow.appendChild(V.utils.el('button', {
+              className: 'vshell-detail-up-name',
+              type: 'button',
+              title: '角色：' + rc.name + '——点击进入角色主页',
+              'aria-label': '角色主页：' + rc.name,
+              onclick: function (e) {
+                e.preventDefault(); e.stopPropagation();
+                V.router.nav('/role/' + encodeURIComponent(rc.name));
+              },
+            }, rc.name));
           });
-        } else if (roleChar2) {
-          // v0.5.6：已有角色头像 = 角色主页入口（点击进入主页；更改走独立按钮）
-          avatar2 = V.utils.el('button', {
-            className: 'vshell-detail-up-avatar',
+          upRow.appendChild(V.utils.el('button', {
+            className: 'vshell-detail-up-edit',
             type: 'button',
-            title: '角色：' + roleChar2.name + '——点击进入角色主页',
-            'aria-label': '角色主页：' + roleChar2.name,
-          });
-          avatar2.addEventListener('click', function () {
-            V.router.nav('/role/' + encodeURIComponent(roleChar2.name));
-          });
-          var setLetter2 = function () {
-            avatar2.innerHTML = '';
-            avatar2.appendChild(V.utils.el('span', { className: 'vshell-detail-up-avatar-letter' },
-              String(roleChar2.name).charAt(0) || '?'));
-          };
-          if (roleChar2.icon) {
-            avatar2.appendChild(V.utils.el('img', { src: roleChar2.icon, alt: '', onerror: setLetter2 }));
-          } else {
-            setLetter2();
-          }
+            title: '更改角色',
+            'aria-label': '更改角色',
+            onclick: function () {
+              if (V.charPicker && V.charPicker.edit) {
+                V.charPicker.edit(id, detail.title, '更改角色', detailMeta(), detail.sourceId);
+              }
+            },
+          }, V.utils.el('span', { className: 'codicon codicon-edit' })));
         } else {
           // v0.5.1：无角色 → 不显示 UP 头像（用户需求）；保留圆形 → 显示 + 号按钮，
           // 文本「添加角色」，点击唤出添加角色 UI（角色列表选择）
-          avatar2 = V.utils.el('button', {
+          var avAdd = V.utils.el('button', {
             className: 'vshell-detail-up-avatar is-add',
             type: 'button',
             title: '添加角色',
             'aria-label': '添加角色',
           }, [V.utils.el('span', { className: 'codicon codicon-add' })]);
-          avatar2.addEventListener('click', function () {
+          avAdd.addEventListener('click', function () {
             if (V.charPicker && V.charPicker.edit) {
               V.charPicker.edit(id, detail.title, '添加角色', detailMeta(), detail.sourceId);
             }
           });
-        }
-        upRow.appendChild(avatar2);
-        // v0.5.3：冲突时名字区显示「角色冲突」文本（用户需求）
-        // v0.5.6 第十一轮（用户需求 3）：已有角色时名字可点击（更改角色，
-        // 取代原独立编辑按钮）+ 右侧关注按钮；冲突/无角色保持文本
-        if (roleChar2) {
-          upRow.appendChild(V.utils.el('button', {
-            className: 'vshell-detail-up-name',
-            type: 'button',
-            title: '更改角色',
-            'aria-label': '更改角色',
-            onclick: function () {
-              if (V.charPicker && V.charPicker.edit) V.charPicker.edit(id, detail.title, null, detailMeta(), detail.sourceId);
-            },
-          }, roleChar2.name));
-          var followed2 = V.characters && V.characters.isFollowed
-            ? V.characters.isFollowed(roleChar2.name) : false;
-          var followBtn2 = V.utils.el('button', {
-            className: 'vshell-detail-up-follow' + (followed2 ? ' is-followed' : ''),
-            type: 'button',
-            title: followed2 ? '取消关注' : '关注角色',
-            'aria-label': followed2 ? '取消关注' : '关注角色',
-            onclick: function (e) {
-              // v0.5.6 第十二轮需求 3：pop 动画（背景不变）。**必须先**拿
-              // 容器引用：toggleFollow 的 notify 触发 renderUpRow 同步重建
-              // up 行——重建后旧按钮 parentNode 断开（closest 失败）
-              var upEl = e.target && e.target.closest
-                ? e.target.closest('.vshell-detail-up') : null;
-              V.characters.toggleFollow(roleChar2.name);
-              var nb = upEl ? upEl.querySelector('.vshell-detail-up-follow') : null;
-              if (nb) {
-                nb.classList.remove('is-popping');
-                void nb.offsetWidth;
-                nb.classList.add('is-popping');
-              }
-            },
-          }, V.utils.el('span', {
-            className: 'codicon ' + (followed2 ? 'codicon-check' : 'codicon-add'),
-          }));
-          upRow.appendChild(followBtn2);
-        } else {
+          upRow.appendChild(avAdd);
           upRow.appendChild(V.utils.el('span', {
-            className: 'vshell-detail-up-name' + (conflictChars2 ? ' is-conflict' : ''),
-          }, conflictChars2 ? '角色冲突' : '添加角色'));
+            className: 'vshell-detail-up-name',
+          }, '添加角色'));
         }
       }
       renderUpRow();

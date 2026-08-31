@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.28
+// @version      0.6.30
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.28';
+window.VShell.version = '0.6.30';
 
 /* vshell 入口见 src/app.js */
 
@@ -1046,38 +1046,38 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
 /* ===== src/core/characters.js ===== */
 
 /* ============================================================
- * characters — 角色系统（v0.5.0，标签功能全面升级）
+ * characters — 角色系统（v0.5.0 标签升级；v0.6.30 多角色重构）
  *
  * 背景：不同 UP 可能创作同一角色；有的视频平台没有「UP」概念
  * → 为通用性统一用「角色」指代增强后的标签功能。
  *
- * 三个 store 键（store 自动加 vshell. 前缀）：
- *  - 'characters'：角色列表 [{name, icon, keywords:[...]}]
- *    keywords = 自定义关键词列表（**含角色名**，匹配只认关键词）
- *  - 'videoChars'：{videoId: roleName}——已被赋予的角色
- *    （自动匹配赋予 / 手动赋予 / 冲突解析选定，统一存这里）
- *  - 'charConflicts'：{videoId: [roleName,...]}——冲突态
- *    （标题一次性匹配多个角色 → 不自动赋予，标记冲突）
- *  - 'charLocks'（v0.5.6）：{videoId: true}——**人工锁定**：手动赋予/
- *    冲突解析选定的视频不再被 charFor 自动重评升级为冲突
- *    （用户报：解决冲突选了角色但立即又变回冲突态，结果不生效）
- *  - 'charVideos'（v0.5.6）：{roleName: [videoMeta,...]}——该角色名下
- *    的视频快照（角色主页「手动添加」列表数据源；assign/resolveConflict
- *    时由调用方传入 meta：{id,bvid,title,cover,url,addedAt}）
+ * store 键（store 自动加 vshell. 前缀，按数据源 scopedKey）：
+ *  - 'characters'：角色列表 [{name, icon, keywords:[...], exclusions:[...]}]
+ *  - 'videoChars'：{videoId: [roleName,...]}——**全部**已赋予角色
+ *    （手动赋予 + 自动赋予统一存这里，数组）
+ *  - 'charManuals'：{videoId: {names:[手动角色...], at}}——**手动名单**。
+ *    角色分两类：手动赋予（用户显式点选 / 播放 5s 升级）与自动赋予
+ *    （标题关键词匹配 / 角色页搜索赋予）。自动 = videoChars - manuals。
+ *  - 'charVideos'：{roleName: [videoMeta,...]}——**仅手动赋予**写快照
+ *    （角色主页「手动添加」段数据源；自动赋予不进快照）
+ *  - 'charConflicts'：**废弃**（v0.6.30 无冲突概念——一个视频可属多个
+ *    角色，命中多个全部自动赋予；历史键保留不读不写新数据）
+ *  - 'charLocks'（历史）：{videoId: true} 人工锁定（保留字段不再读）
+ *  - 'charFollows'：{roleName: true} 关注的角色
+ *  - 'charRemoved'：{id: true} 手动移除标记（不再自然赋予防复活）
  *
- * 自动赋予（卡片**第一次**加载时，charFor 调用）：
- *  - videoChars 已有该视频 → 直接返回已赋予角色（不再匹配）
- *  - charConflicts 已有 → 返回冲突态（不再重新匹配）
- *  - 否则按标题关键词匹配：0 命中 → 无角色（不存，角色/关键词
- *    变化后可重新匹配）；1 命中 → 自动赋予（存 videoChars）；
- *    ≥2 命中 → 冲突（存 charConflicts）
+ * 角色赋予模型（用户拍板 v0.6.30）：
+ *  - 自动赋予：①标题关键词匹配（charFor 首次加载，命中全部角色）
+ *    ②角色页搜索赋予（assignAuto，跨源：a 源视频 → a 源角色；目标源
+ *    无同名角色 → 先建副本复制 icon/banner/keywords/exclusions）
+ *  - 手动赋予：详情页/卡片弹窗（setManual 整体提交手动名单）；
+ *    自动角色不因手动编辑消失（手动增删只动手动名单）
+ *  - **升级规则**：视频实际播放连续满 5s（watched 状态机，不累计）
+ *    → autoToManual：该视频**所有**角色转为手动（manuals 全量 + 锁定）
+ *  - unassign（重置）：清除手动名单 → 按标题自然重评（重新自动赋予）
  *
- * 手动管理（详情页弹窗，用户拍板）：
- *  - assign(id, name|null)：显式赋予 / 移除（同时清冲突态）
- *  - resolveConflict(id, name|null)：冲突解析（选定 / 放弃）
- *
- * 旧数据迁移：v0.5.0 前 store 'tags'（字符串数组或 [{name,icon}]）
- * → 自动迁移为 [{name, icon, keywords:[name]}] 并删除 tags 键。
+ * 旧数据迁移：videoChars 单值字符串 → [字符串]；manuals {name} →
+ * {names:[name]}；'tags' 旧键 → [{name, icon, keywords:[name]}]。
  * ============================================================ */
 (function () {
   'use strict';
@@ -1443,7 +1443,14 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     d.chars.splice(i, 1);
     var dirty = false;
     Object.keys(d.videoChars).forEach(function (id) {
-      if (d.videoChars[id] === name) { delete d.videoChars[id]; dirty = true; }
+      // v0.6.30 多角色数组：从数组移除该角色（空数组删键）
+      var arr = d.videoChars[id];
+      if (typeof arr === 'string') { if (arr === name) { delete d.videoChars[id]; dirty = true; } return; }
+      if (Array.isArray(arr) && arr.indexOf(name) >= 0) {
+        arr = arr.filter(function (x) { return x !== name; });
+        if (arr.length) d.videoChars[id] = arr; else delete d.videoChars[id];
+        dirty = true;
+      }
     });
     Object.keys(d.conflicts).forEach(function (id) {
       var arr = d.conflicts[id];
@@ -1493,7 +1500,16 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     c.keywords = (c.keywords || []).map(function (k) { return k === oldName ? nn : k; });
     var dirty = false;
     Object.keys(d.videoChars).forEach(function (id) {
-      if (d.videoChars[id] === oldName) { d.videoChars[id] = nn; dirty = true; }
+      // v0.6.30 多角色数组：替换数组中旧名 → 新名
+      var arr = d.videoChars[id];
+      if (typeof arr === 'string') {
+        if (arr === oldName) { d.videoChars[id] = nn; dirty = true; }
+        return;
+      }
+      if (Array.isArray(arr) && arr.indexOf(oldName) >= 0) {
+        d.videoChars[id] = arr.map(function (x) { return x === oldName ? nn : x; });
+        dirty = true;
+      }
     });
     Object.keys(d.conflicts).forEach(function (id) {
       var arr = d.conflicts[id];
@@ -1676,18 +1692,26 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     return out;
   }
 
-  /** 已赋予角色名（无 → null；v0.5.7 srcId 缺省主源） */
+  /** 已赋予角色名**数组**（无 → null；v0.6.30 多角色：返回全部角色名；
+   *  旧单值数据自动迁移。v0.5.7 srcId 缺省主源） */
   function getChar(id, srcId) {
     var d = dataOf(srcId && srcId !== 'local' ? srcId : primaryId());
-    return id ? d.videoChars[id] || null : null;
+    var arr = vcArr(d, id);
+    return arr && arr.length ? arr.slice() : null;
   }
 
-  /** 冲突角色名数组（无 → null；v0.5.7 srcId 缺省主源） */
-  function getConflict(id, srcId) {
-    if (!id) return null;
+  /** v0.6.30：该视频**手动**角色名单（无 → []）——弹窗草稿初始值 */
+  function getManual(id, srcId) {
+    if (!id) return [];
     var d = dataOf(srcId && srcId !== 'local' ? srcId : primaryId());
-    var arr = d.conflicts[id];
-    return arr && arr.length ? arr.slice() : null;
+    var mn = mNames(d, id);
+    return mn ? mn.slice() : [];
+  }
+
+  /** 冲突态——v0.6.30 废弃（一个视频可属多个角色，无冲突概念）。
+   *  保留函数签名兼容旧调用方，恒返回 null。 */
+  function getConflict() {
+    return null;
   }
 
   /** 写回某源的角色数据（8 键；srcDataOf 的镜像） */
@@ -1706,35 +1730,78 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     invalidateSrc(srcId);
   }
 
+  /* ---------- v0.6.30 多角色辅助 ---------- */
+
+  /** 读 videoChars[id] 为数组（旧单值字符串自动迁移为 [字符串]） */
+  function vcArr(d, id) {
+    if (!id) return null;
+    var v = d.videoChars[id];
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'string' && v) return [v];
+    return null;
+  }
+
+  /** 读 manuals[id] 手动名单（兼容旧 {name,at} 单值格式 → [name]） */
+  function mNames(d, id) {
+    var m = d.manuals[id];
+    if (!m) return null;
+    if (Array.isArray(m.names) && m.names.length) return m.names;
+    if (typeof m.name === 'string' && m.name) return [m.name];
+    return null;
+  }
+
+  /** 角色名数组 → 角色对象列表（按 chars 列表顺序；找不到的跳过） */
+  function resolveChars(d, names) {
+    var out = [];
+    (names || []).forEach(function (n) {
+      for (var i = 0; i < d.chars.length; i++) {
+        if (d.chars[i].name === n) { out.push(d.chars[i]); break; }
+      }
+    });
+    return out;
+  }
+
+  /** 目标源无同名角色 → 在目标源**建立副本**（全源查同名，复制
+   *  icon/banner/keywords/exclusions——用户拍板 v0.6.30：跨源添加时
+   *  b 源无此角色则先建 b 源副本再赋予；各源实际数据不合并，仅在
+   *  多源整合（listAll）时按名并集） */
+  function ensureRoleOn(d, vidSrc, name) {
+    var exists = d.chars.some(function (c) { return c.name === name; });
+    if (exists) return;
+    var srcChar = null;
+    var ids = srcIds();
+    for (var s = 0; s < ids.length && !srcChar; s++) {
+      var sd = dataOf(ids[s]);
+      sd.chars.forEach(function (c) {
+        if (!srcChar && c.name === name) srcChar = c;
+      });
+    }
+    d.chars.unshift({
+      name: name,
+      icon: srcChar ? srcChar.icon || '' : '',
+      banner: srcChar ? srcChar.banner || '' : '',
+      keywords: srcChar && srcChar.keywords && srcChar.keywords.length
+        ? srcChar.keywords.slice() : [name],
+      exclusions: srcChar && srcChar.exclusions ? srcChar.exclusions.slice() : [],
+    });
+  }
+
   /** 角色解析核心（按源数据上运行；v0.5.7 从 charFor 抽出）：
-   *  自动赋予/冲突判定（持久化经 persistFn）。语义与原 charFor 一致。 */
+   *  v0.6.30 多角色无冲突：已有角色 → 直接返回全部（不再自动增删）；
+   *  无角色 → 标题命中**全部**自动赋予（数组）。返回
+   *  { kind:'char', chars:[角色对象...] } 或 { kind:'none' }。 */
   function charForOn(d, id, title, persistFn) {
     if (!id) return { kind: 'none' };
-    var name = d.videoChars[id];
-    var hits = matchTitleOn(d, title);
-    if (name) {
-      var found = null;
-      d.chars.forEach(function (c) { if (c.name === name) found = c; });
-      if (!found) return { kind: 'none' };
-      if (d.locks[id]) return { kind: 'char', char: found };
-      if (hits.length >= 2 && hits.some(function (h) { return h.name === name; })) {
-        d.conflicts[id] = hits.map(function (h) { return h.name; });
-        persistFn();
-        return { kind: 'conflict', chars: d.conflicts[id].slice() };
-      }
-      return { kind: 'char', char: found };
+    var arr = vcArr(d, id);
+    if (arr && arr.length) {
+      return { kind: 'char', chars: resolveChars(d, arr) };
     }
     if (d.removedIds[id]) return { kind: 'none' };
-    if (d.conflicts[id]) return { kind: 'conflict', chars: d.conflicts[id].slice() };
-    if (hits.length === 1) {
-      d.videoChars[id] = hits[0].name;
+    var hits = matchTitleOn(d, title);
+    if (hits.length) {
+      d.videoChars[id] = hits.map(function (h) { return h.name; });
       persistFn();
-      return { kind: 'char', char: hits[0] };
-    }
-    if (hits.length > 1) {
-      d.conflicts[id] = hits.map(function (h) { return h.name; });
-      persistFn();
-      return { kind: 'conflict', chars: d.conflicts[id].slice() };
+      return { kind: 'char', chars: hits };
     }
     return { kind: 'none' };
   }
@@ -1785,149 +1852,161 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     touchVideoOn(mainData(), name, id, meta, isRemove);
   }
 
-  /** 显式赋予/移除核心（按源数据上运行；assign/resolveConflict/assignTo 共用） */
-  function assignOn(d, id, name, meta) {
-    var prev = d.videoChars[id];
-    if (name) {
-      d.videoChars[id] = name;
-      d.locks[id] = true;                       // 人工锁定
-      d.manuals[id] = { name: name, at: Date.now() };   // 手动指定标记
-      touchVideoOn(d, name, id, meta, false);
-      d.removedIds[id] = false;                 // 重新赋予清除移除标记（值标记防 dictionary 退化）
+  /** v0.6.30 多角色**整体设置手动名单**（详情页/卡片弹窗提交）：
+   *  - list = 新手动角色名数组；原**自动**角色（videoChars 中非原手动的）
+   *    保留——手动编辑只动手动名单，自动角色不因手动编辑消失
+   *  - 最终 videoChars = 新手动 + 原自动（去重）；全部取消且原手动非空
+   *    → 移除标记（防自然复活）
+   *  - charVideos 快照 diff：新增手动角色写快照、移出手动角色删快照
+   *    （自动角色不写快照——角色页「手动添加」段只含手动赋予）
+   *  - 手动名单非空 → manuals[id]={names,at} + locks；空 → 删 manuals/locks
+   *  返回最终手动名单。 */
+  function setManual(id, list, meta, srcId) {
+    if (!id) return [];
+    var sid = srcId && srcId !== 'local' ? srcId : primaryId();
+    var d = dataOf(sid);
+    var names = Array.isArray(list) ? list.filter(function (n) {
+      return n && typeof n === 'string';
+    }) : [];
+    names = names.filter(function (n, i, a) { return a.indexOf(n) === i; });
+    var oldManual = mNames(d, id) ? mNames(d, id).slice() : [];
+    var arr = vcArr(d, id);
+    var autoNames = [];
+    if (arr) {
+      autoNames = arr.filter(function (n) { return oldManual.indexOf(n) < 0; });
+    }
+    var finalNames = names.slice();
+    autoNames.forEach(function (n) {
+      if (finalNames.indexOf(n) < 0) finalNames.push(n);
+    });
+    if (finalNames.length) {
+      d.videoChars[id] = finalNames;
+      if (d.removedIds[id]) d.removedIds[id] = false;
     } else {
       delete d.videoChars[id];
-      delete d.locks[id];
-      delete d.manuals[id];
-      d.removedIds[id] = true;                  // 手动移除：此后不再自然赋予/冲突（防复活）
+      if (oldManual.length) d.removedIds[id] = true;   // 全部取消 = 手动移除
     }
-    if (prev && prev !== name) touchVideoOn(d, prev, id, null, true);   // 换角色/移除 → 旧角色列表移除
-    delete d.conflicts[id];
+    names.forEach(function (n) {
+      if (oldManual.indexOf(n) < 0) touchVideoOn(d, n, id, meta, false);
+    });
+    oldManual.forEach(function (n) {
+      if (names.indexOf(n) < 0) touchVideoOn(d, n, id, null, true);
+    });
+    if (names.length) {
+      d.manuals[id] = { names: names.slice(), at: Date.now() };
+      d.locks[id] = true;
+    } else {
+      delete d.manuals[id];
+      delete d.locks[id];
+    }
+    persistSrcData(sid, d);
+    notify();
+    return names.slice();
   }
 
-  /** 显式赋予/移除：assign(id, name|null, meta?, srcId?)（清冲突态；人工锁定）
-   *  v0.5.3：操作后广播（详情页 UP 行/卡片角标即时刷新，用户需求 1）
-   *  v0.5.6：meta 可选——有则写入角色视频快照（角色主页）；无则只记录 id
-   *  （展示时从 saved 兜底查元数据）。人工赋予 → locks[id]（不再重评冲突）
-   *  v0.5.7：srcId 指定归属源（缺省主源） */
+  /** 显式赋予/移除——v0.6.30 薄壳：name → setManual([name])（清掉旧手动
+   *  名单、保留自动角色）；name 空 → setManual([])（移除全部手动）。
+   *  v0.5.6：meta 可选——有则写入角色视频快照（角色主页）。 */
   function assign(id, name, meta, srcId) {
     if (!id) return;
     var sid = srcId && srcId !== 'local' ? srcId : primaryId();
-    var d = dataOf(sid);
-    assignOn(d, id, name, meta);
-    persistSrcData(sid, d);
-    notify();
+    setManual(id, name ? [name] : [], meta, sid);
   }
 
-  /** v0.5.7 多源跨源赋予：给 item（归属源 a）的视频添加角色 name——
-   *  目标源 = **视频归属源 a**（用户拍板 v0.5.8：角色列表按视频源管理——
-   *  a 源视频上使用角色 → 该角色登记进 a 源列表；**唯一**跨源添加途径）。
-   *  - a 源已有该角色 → 直接赋予（写 a 源键）
-   *  - a 源无（弹窗并集列表里选的是其他源的角色 c / 全新名字）→ 在 a 源
-   *    **建立**角色：icon/banner/keywords 从全源同名角色复制（无同名 →
-   *    keywords=[name]；featured 不复制——代表作按源隔离），再赋予。
-   *  其他源数据**完全不碰**。除本入口外无任何路径会跨源添加角色：
-   *  charFor 自动匹配按源隔离（a 源视频只匹配 a 源角色）；assign/
-   *  resolveConflict 的 srcId 由调用方传视频源；角色级操作（icon/banner/
-   *  keywords/featured/follow）按 srcOfRole 角色所属源路由。返回是否成功。 */
+  /** v0.5.7 多源跨源赋予：给 item（归属源 a）的视频添加/移除角色 name——
+   *  v0.6.30 多角色：**toggle 手动名单**（name 已在手动名单 → 移除，否则加入）。
+   *  目标源 = **视频归属源 a**（a 源无同名角色 → ensureRoleOn 建副本复制
+   *  icon/banner/keywords/exclusions；其他源数据不碰）。返回是否成功。 */
   function assignTo(item, name, meta) {
     var id = item && (item.id || item.bvid);
     if (!id || !name) return false;
     var vidSrc = (item.sourceId && item.sourceId !== 'local') ? item.sourceId : primaryId();
     var d = dataOf(vidSrc);
-    var exists = d.chars.some(function (c) { return c.name === name; });
-    if (!exists) {
-      // 全源查找同名角色（只读复制元数据，不修改源数据）
-      var srcChar = null;
-      var ids = srcIds();
-      for (var s = 0; s < ids.length && !srcChar; s++) {
-        var sd = dataOf(ids[s]);
-        sd.chars.forEach(function (c) {
-          if (!srcChar && c.name === name) srcChar = c;
-        });
-      }
-      d.chars.unshift({
-        name: name,
-        icon: srcChar ? srcChar.icon || '' : '',
-        banner: srcChar ? srcChar.banner || '' : '',
-        keywords: srcChar && srcChar.keywords && srcChar.keywords.length
-          ? srcChar.keywords.slice() : [name],
-        // v0.5.9：跨源建立时排除词一并复制（匹配语义保持一致）
-        exclusions: srcChar && srcChar.exclusions ? srcChar.exclusions.slice() : [],
-      });
-    }
-    assignOn(d, id, name, meta);
-    persistSrcData(vidSrc, d);
-    notify();
+    ensureRoleOn(d, vidSrc, name);
+    var oldManual = mNames(d, id) ? mNames(d, id).slice() : [];
+    var list = oldManual.slice();
+    var i = list.indexOf(name);
+    if (i >= 0) list.splice(i, 1); else list.push(name);
+    setManual(id, list, meta, vidSrc);
     return true;
   }
 
-  /** 冲突解析：选定角色（或 null=放弃，保持无角色）——广播同 assign
-   *  v0.5.6：选定即**人工锁定**（不再被 charFor 重评回冲突）；meta 写入快照
-   *  v0.5.7：srcId 指定归属源（缺省主源） */
-  function resolveConflict(id, name, meta, srcId) {
-    if (!id) return;
-    var sid = srcId && srcId !== 'local' ? srcId : primaryId();
-    var d = dataOf(sid);
-    var prev = d.videoChars[id];
-    delete d.conflicts[id];
-    if (name) {
-      d.videoChars[id] = name;
-      d.locks[id] = true;
-      d.manuals[id] = { name: name, at: Date.now() };
-      touchVideoOn(d, name, id, meta, false);
-      d.removedIds[id] = false;
+  /** v0.6.30 **自动赋予**（角色页搜索筛完的视频 / 批量场景）：
+   *  - 目标源 = 视频归属源；无同名角色 → 建副本（复制头像/背景/关键词/排除词）
+   *  - 写入 videoChars（追加，不动已有角色——多角色共存）
+   *  - **不进 manuals（自动角色）**；**不进 charVideos 快照**（角色页
+   *    「手动添加」段只含手动赋予）
+   *  - 清 removedIds 标记（显式赋予，允许自然匹配）
+   *  - 不 notify（批量搜索场景避免雪崩，调用方自行广播）。返回是否成功。 */
+  function assignAuto(item, name) {
+    var id = item && (item.id || item.bvid);
+    if (!id || !name) return false;
+    var vidSrc = (item.sourceId && item.sourceId !== 'local') ? item.sourceId : primaryId();
+    var d = dataOf(vidSrc);
+    ensureRoleOn(d, vidSrc, name);
+    var arr = vcArr(d, id);
+    if (arr) {
+      if (arr.indexOf(name) >= 0) return true;      // 已拥有
     } else {
-      delete d.videoChars[id];
-      delete d.locks[id];
-      delete d.manuals[id];
-      d.removedIds[id] = true;
+      arr = d.videoChars[id] = [];
     }
-    if (prev && prev !== name) touchVideoOn(d, prev, id, null, true);
-    persistSrcData(sid, d);
-    notify();
+    arr.push(name);
+    if (d.removedIds[id]) d.removedIds[id] = false;
+    persistSrcData(vidSrc, d);
+    return true;
   }
 
-  /** v0.5.6 第五轮：该视频角色是否为**手动指定**（assign/resolveConflict/
-   *  观看 5s 自动转手动；与自然赋予区分——即使结果一致也不同）
-   *  v0.5.7：srcId 缺省主源 */
+  /** 冲突解析——v0.6.30 废弃（无冲突概念，一个视频可属多个角色）。
+   *  旧调用方（char-picker conflict 弹窗）已删除；保留空实现防外部引用崩。 */
+  function resolveConflict() { /* noop */ }
+
+  /** v0.5.6 第五轮：该视频是否有**手动**角色（manuals 名单非空；
+   *  与自动赋予区分——自动角色 = videoChars - manuals）。v0.5.7：srcId 缺省主源 */
   function isManual(id, srcId) {
     if (!id) return false;
     var d = dataOf(srcId && srcId !== 'local' ? srcId : primaryId());
-    return !!d.manuals[id];
+    var mn = mNames(d, id);
+    return !!(mn && mn.length);
   }
 
-  /** v0.5.6 第五轮：还原角色——去除手动指定（删 manual/lock/赋予/冲突），
-   *  然后按标题自然重评（可能恢复自然角色 / 冲突 / 无角色）。
-   *  返回是否曾为手动指定。title 缺省则只清理不重评。
-   *  v0.5.7：srcId 缺省主源 */
+  /** v0.5.6 第五轮：还原角色（重置）——去除手动指定（删 manual/lock/全部
+   *  角色），然后按标题自然重评（可能恢复自动角色 / 无角色）。
+   *  v0.6.30 多角色：全部角色清除后重评（标题命中全部自动赋予）。
+   *  返回是否曾为手动指定。title 缺省则只清理不重评。v0.5.7：srcId 缺省主源 */
   function unassign(id, title, srcId) {
     if (!id) return false;
     var sid = srcId && srcId !== 'local' ? srcId : primaryId();
     var d = dataOf(sid);
-    var had = !!d.manuals[id];
+    var had = isManual(id, sid);
+    var oldManual = had ? mNames(d, id).slice() : [];
     delete d.manuals[id];
     delete d.locks[id];
     delete d.videoChars[id];
     delete d.conflicts[id];
-    d.removedIds[id] = false;                    // v0.5.6 第二十七轮：还原 = 允许自然重评（值标记防 dictionary 退化）
-    if (had && title) charForOn(d, id, title, function () {});   // 先自然重评（写回自然角色/冲突）
+    d.removedIds[id] = false;                    // 还原 = 允许自然重评（值标记防 dictionary 退化）
+    oldManual.forEach(function (n) { touchVideoOn(d, n, id, null, true); });   // 快照移除
+    if (had && title) charForOn(d, id, title, function () {});   // 自然重评（写回自动角色）
     persistSrcData(sid, d);
     notify();                                           // 再广播（UI 读到最终态）
     return had;
   }
 
-  /** v0.5.6 第五轮：观看满 5s 自动将自然角色转为手动指定（用户需求）——
-   *  隐式操作（不广播）；悬停预览不走 watched 路径天然豁免。
+  /** v0.5.6 第五轮：观看满 5s 自动将**所有**角色转为手动（用户需求
+   *  v0.6.30 明确：一个视频一旦实际播放超 5s，其所有自动赋予的角色
+   *  就变成手动赋予的角色）——
+   *  幂等（已有手动名单不再重复）；无角色/无自动角色不动作（调用方
+   *  watched.mark 在播放满 5s 后触发；无自动角色时计时无需启动，这里
+   *  直接短路）。隐式操作（不广播——打开弹窗时实时读到最终态）。
    *  v0.5.7：srcId 缺省主源 */
   function autoToManual(id, srcId) {
     if (!id) return false;
     var sid = srcId && srcId !== 'local' ? srcId : primaryId();
     var d = dataOf(sid);
-    if (d.manuals[id]) return false;
-    var name = d.videoChars[id];
-    if (!name) return false;
-    d.manuals[id] = { name: name, at: Date.now() };
-    d.locks[id] = true;                       // 转手动后不再自动重评
+    if (mNames(d, id) && mNames(d, id).length) return false;      // 已有手动 → 不重复
+    var arr = vcArr(d, id);
+    if (!arr || !arr.length) return false;              // 无角色 → 无需计时
+    d.manuals[id] = { names: arr.slice(), at: Date.now() };
+    d.locks[id] = true;
     persistSrcData(sid, d);
     return true;
   }
@@ -2033,15 +2112,18 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     setExclusions: setExclusions,       // v0.5.9：排除词（标题命中即不匹配）
     rename: rename,                     // v0.5.9：角色改名（全关联迁移）
     matchTitle: matchTitle,
-    getChar: getChar,
-    getConflict: getConflict,
-    charFor: charFor,
-    assign: assign,
-    assignTo: assignTo,               // v0.5.7 多源：跨源赋予（目标源=角色所属源，缺则建）
-    resolveConflict: resolveConflict,
-    isManual: isManual,               // v0.5.6 第五轮：手动指定标记
+    getChar: getChar,                     // v0.6.30：返回角色名**数组**
+    getManual: getManual,                 // v0.6.30：手动角色名单（弹窗草稿）
+    getConflict: getConflict,             // 废弃（恒 null）
+    charFor: charFor,                     // v0.6.30：{kind:'char', chars:[...]}
+    assign: assign,                       // v0.6.30：setManual 薄壳
+    assignTo: assignTo,               // v0.5.7 多源：跨源 toggle 手动（缺则建副本）
+    assignAuto: assignAuto,           // v0.6.30：自动赋予（搜索/批量，不写快照）
+    setManual: setManual,             // v0.6.30：整体设置手动名单（弹窗提交）
+    resolveConflict: resolveConflict,     // 废弃（空实现兼容）
+    isManual: isManual,               // v0.5.6 第五轮：手动名单非空
     unassign: unassign,               // v0.5.6 第五轮：还原角色（去除手动指定）
-    autoToManual: autoToManual,       // v0.5.6 第五轮：观看 5s 自然转手动
+    autoToManual: autoToManual,       // v0.5.6 第五轮：观看 5s 所有角色转手动
     find: find,                       // v0.5.6：按名查找（角色主页）
     videosOf: videosOf,               // v0.5.6：角色名下视频快照
     toggleFollow: toggleFollow,       // v0.5.6 第十一轮：关注/取消关注
@@ -2049,9 +2131,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     onChange: onChange,
 
     /** v0.6.4 聚合合并：成员（及被合并组 extraGids）的角色设置迁移到组
-     *  （videoChars/charConflicts 的 'grp' 源键，组 id 'grp:xxx'）；
-     *  多角色 → charConflicts 正常冲突流程（卡片红字 → 弹窗选择）。
-     *  成员原角色保留（解除聚合后可恢复）。仅手动合并路径调用。 */
+     *  （videoChars 的 'grp' 源键，组 id 'grp:xxx'）。
+     *  v0.6.30 多角色：全部角色直接并成数组（无冲突概念——一个视频
+     *  可属多个角色；组卡显示全部）。成员原角色保留（解除聚合后可恢复）。
+     *  仅手动合并路径调用。 */
     absorbToGroup: function (gid, members, extraGids) {
       var sid = 'grp';
       var d = srcDataOf(sid);
@@ -2059,28 +2142,18 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       function addName(n) {
         if (n && typeof n === 'string' && names.indexOf(n) === -1) names.push(n);
       }
-      function collectConflict(arr) {
-        if (Array.isArray(arr)) arr.forEach(addName);
-      }
-      if (d.videoChars[gid]) addName(d.videoChars[gid]);
-      collectConflict(d.conflicts[gid]);
+      function collect(arr) { if (Array.isArray(arr)) arr.forEach(addName); }
+      collect(vcArr(d, gid));
+      collect(d.conflicts[gid]);
       (members || []).forEach(function (m) {
-        try { addName(srcDataOf(m.src).videoChars[String(m.id)]); } catch (e) { /* noop */ }
+        try { collect(vcArr(srcDataOf(m.src), String(m.id))); } catch (e) { /* noop */ }
       });
       (extraGids || []).forEach(function (og) {
-        try {
-          if (d.videoChars[og]) addName(d.videoChars[og]);
-          collectConflict(d.conflicts[og]);
-        } catch (e) { /* noop */ }
+        try { collect(vcArr(d, og)); collect(d.conflicts[og]); } catch (e) { /* noop */ }
       });
       if (!names.length) return;   // 无角色，不动
-      if (names.length === 1) {
-        d.videoChars[gid] = names[0];
-        delete d.conflicts[gid];
-      } else {
-        d.conflicts[gid] = names;
-        delete d.videoChars[gid];
-      }
+      d.videoChars[gid] = names;
+      delete d.conflicts[gid];
       (extraGids || []).forEach(function (og) {
         delete d.videoChars[og];
         delete d.conflicts[og];
@@ -6718,30 +6791,21 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
 /* ===== src/components/char-picker.js ===== */
 
 /* ============================================================
- * char-picker — 角色选择弹窗（v0.5.0 角色系统；v0.5.4 草稿模式重构）
+ * char-picker — 角色选择弹窗（v0.5.0 角色系统；v0.5.4 草稿模式重构；
+ * v0.6.30 多角色重构——冲突机制废弃，一个视频可属多个角色）
  *
- * 三个入口（复用 .vshell-modal 弹窗体系）：
- * 1) conflict(videoId, title, charNames)——冲突处理：
- *    全部角色（冲突候选置顶 + 红色高亮），点击选定
- * 2) edit(videoId, title)——手动管理（用户拍板：详情页弹窗）：
- *    全部角色（当前赋予 is-current 高亮），点击 = 赋予/更换
- * 3) list()——角色列表（v0.5.6 第十一轮，用户需求 1）：
+ * 入口（复用 .vshell-modal 弹窗体系）：
+ * 1) edit(videoId, title, headTitle?, meta?, srcId?)——手动管理（唯一入口）：
+ *    全部角色列表；**手动名单**多选 toggle（is-current 高亮），自动角色
+ *    灰显「自动」徽标（点击转手动）；完成 → setManual 整体提交
+ * 2) list()——角色列表（v0.5.6 第十一轮，用户需求 1）：
  *    导航栏「角色」按钮入口——两列长条（背景图），右上角「打开角色
  *    管理」按钮，每角色右侧关注按钮；点击长条进角色主页
+ * （conflict 冲突弹窗 v0.6.30 删除——命中多个角色全部自动赋予）
  *
- * v0.5.4 草稿模式（用户需求 4/6）：
- *  - 点击角色行 / 不指定 / 移除角色 都只改**草稿高亮**，不写 store、不退出
- *  - 退出方式只有三种：点「完成」（保存退出）、点浮窗外区域（保存退出）、
- *    点「回退」（v0.5.6 第六轮改名，原「还原」——放弃草稿、不保存、弹窗
- *    继续——撤销到打开时的状态）
- *  - 添加角色场景（无角色）无「移除角色」按钮（用户需求 4 之前拍板）
- * v0.5.6 第六轮（用户需求 5 改名）：「还原角色」→「重置」（去除手动指定）、
- *  「还原」→「回退」（放弃草稿）——语义不再重复
- * v0.5.6 第十一轮（用户需求 1）：
- *  - 角色列表显示改为**两列长条**：背景 = 角色背景图（默认 SVG/自定义），
- *    左侧头像 + 名称；选中高亮重新设计（focusBorder 蓝边框 + ✓ 徽章），
- *    冲突标识复用（红竖条 + 红字）
- *  - charRow 外层由 button 改 div（长条内含关注按钮——button 不能嵌套）
+ * v0.5.4 草稿模式：点击角色行只改**草稿高亮**，不写 store、不退出；
+ * 退出方式只有三种：点「完成」（保存退出）、点浮窗外区域（保存退出）、
+ * 点「回退」（放弃草稿、不保存、弹窗继续）
  * ============================================================ */
 (function () {
   'use strict';
@@ -6882,82 +6946,28 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     }, label);
   }
 
-  /** 冲突处理：全部角色（冲突候选置顶 + 红色高亮，v0.5.3）
-   *  v0.5.4 草稿模式：点击行只选中草稿；完成/外部点击 = resolveConflict(draft)；
-   *  「回退」= 放弃草稿（回未选，不保存）
-   *  v0.5.6：meta（视频快照）可选——resolve 时写入角色主页「手动添加」列表 */
-  function conflict(videoId, title, charNames, meta, srcId) {
-    if (panel) close();
-    var src = srcId || null;
-    var chars = (V.characters ? V.characters.list() : []);
-    var candNames = charNames || [];
-    var ordered = chars.slice().sort(function (a, b) {
-      var ai = candNames.indexOf(a.name), bi = candNames.indexOf(b.name);
-      return (ai < 0 ? 1 : 0) - (bi < 0 ? 1 : 0);
-    });
-    var sub = '「' + (title || videoId) + '」匹配到多个角色，请选择这个视频的角色';
-    var list = V.utils.el('div', { className: 'vshell-tag-list vshell-char-list' });
-    var draft = null;   // 草稿（null = 不指定）——v0.5.4 不写 store 直到退出
+  /** 冲突处理——v0.6.30 废弃（无冲突概念，一个视频可属多个角色）。
+   *  charFor 命中多个 → 全部自动赋予；旧调用方（video-card/feed/detail
+   *  的 is-conflict 分支）已随多角色改造移除。保留空实现防外部引用崩。 */
+  function conflict() { /* noop */ }
 
-    function renderList() {
-      list.innerHTML = '';
-      if (!ordered.length) {
-        list.appendChild(V.utils.el('div', { className: 'vshell-modal-sub' },
-          '还没有角色——先到导航栏「角色」添加'));
-        return;
-      }
-      ordered.forEach(function (c) {
-        var isCand = candNames.indexOf(c.name) >= 0;
-        var row = charRow(c, function () {
-          // v0.5.4：只改草稿，不 resolve、不退出
-          draft = draft === c.name ? null : c.name;
-          renderList();
-        }, { title: '选择角色：' + c.name });
-        if (isCand) row.classList.add('is-conflict');
-        if (c.name === draft) row.classList.add('is-current');
-        list.appendChild(row);
-      });
-    }
-    renderList();
-
-    function applyAndClose() {
-      if (V.characters && draft !== null) {
-        // v0.5.7 多源：跨源赋予（目标源 = 角色所属源）
-        V.characters.assignTo({ id: videoId, sourceId: src, title: title }, draft, meta);
-        V.toast.ok('已设为角色：' + draft);
-      } else if (V.characters) {
-        // draft === null：不指定（清冲突，保持无角色）
-        V.characters.resolveConflict(videoId, null, meta, src);
-        V.toast.info('不指定角色');
-      }
-      close();
-    }
-    build('选择角色', sub, list, [
-      // v0.5.6 追加：去除「不指定」按钮（用户需求）——想不指定 = 点击当前
-      // 高亮行取消选中（draft=null）或「回退」，完成时 resolveConflict(null)
-      // v0.5.6 第六轮：文案改名（用户需求 5）「还原」→「回退」
-      footBtn('回退', 'vshell-btn-secondary', function () {
-        draft = null;            // 放弃草稿（打开时即未选），不保存、不退出
-        renderList();
-      }),
-      footBtn('完成', 'vshell-btn-primary', applyAndClose),
-    ], applyAndClose);
-    V.charPicker._close = applyAndClose;
-  }
-
-  /** 手动更改（草稿模式 v0.5.4）：全部角色（当前赋予 is-current 高亮）
+  /** 手动更改（草稿模式 v0.5.4；v0.6.30 多角色重构）：
+   *  - 草稿 = **手动角色名单**（数组，可多选）：点击行 toggle 加入/移出
+   *  - 自动角色（已拥有但不在手动名单）显示灰色「自动」徽标，点击 = 转手动
+   *  - 完成 → setManual(整体提交手动名单)——原自动角色保留不因编辑消失
+   *  - 全部取消选中 = 移除全部手动角色（自动角色若存在仍保留）
    *  headTitle 可选（默认'更改角色'；无角色场景传'添加角色'）
-   *  v0.5.5：不再显示 sub 文案「xxxx——点击角色赋予/更换」（用户需求）
-   *  v0.5.6 追加：「编辑角色」→「更改角色」（用户需求，icon 同步换 arrow-swap）
-   *  v0.5.6 第六轮：按钮文案「还原」→「回退」、「还原角色」→「重置」（用户需求 5）
-   *  meta（视频快照）可选——assign 时写入角色主页「手动添加」列表
-   *  v0.5.7 多源：srcId = 视频归属源——角色列表 = 并集（list()）；确认走
-   *  assignTo（目标源 = 角色所属源，跨源添加自动在目标源建立角色） */
+   *  v0.5.6 第六轮：按钮文案「还原」→「回退」、「还原角色」→「重置」
+   *  meta（视频快照）可选——setManual 时写入角色主页「手动添加」列表
+   *  v0.5.7 多源：srcId = 视频归属源——角色列表 = 并集（list()）；
+   *  跨源添加（目标源无同名角色）自动在目标源建立副本（ensureRoleOn） */
   function edit(videoId, title, headTitle, meta, srcId) {
     if (panel) close();
     var src = srcId || null;
-    var current = V.characters ? V.characters.getChar(videoId, src) : null;   // 实际角色（打开时）
-    var draft = current;                                                  // 草稿
+    var currentManual = V.characters && V.characters.getManual
+      ? V.characters.getManual(videoId, src) : [];     // 手动名单（打开时）
+    var allOwned = V.characters ? V.characters.getChar(videoId, src) : null;  // 全部角色（含自动）
+    var draft = currentManual.slice();                 // 草稿（手动名单）
     var list = V.utils.el('div', { className: 'vshell-tag-list vshell-char-list' });
 
     function renderList() {
@@ -6969,42 +6979,44 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         return;
       }
       chars.forEach(function (c) {
-        var on = c.name === draft;
+        var on = draft.indexOf(c.name) >= 0;
+        var isAuto = allOwned && allOwned.indexOf(c.name) >= 0 && !on;
         var row = charRow(c, function () {
-          // v0.5.4：只改草稿，不 assign、不退出
-          draft = on ? null : c.name;
+          // v0.5.4：只改草稿，不 setManual、不退出（v0.6.30 多选 toggle）
+          var i = draft.indexOf(c.name);
+          if (i >= 0) draft.splice(i, 1); else draft.push(c.name);
           renderList();
-        }, { title: on ? '取消选中' : '选择角色：' + c.name });
+        }, { title: on ? '取消选中' : (isAuto ? '转为手动角色：' + c.name : '选择角色：' + c.name) });
         if (on) row.classList.add('is-current');
+        if (isAuto) {
+          row.classList.add('is-auto');
+          row.appendChild(V.utils.el('span', {
+            className: 'vshell-tag-row-auto',
+            title: '自动赋予的角色（播放满 5s 后自动转手动）',
+          }, '自动'));
+        }
         list.appendChild(row);
       });
     }
     renderList();
 
     function applyAndClose() {
-      // v0.5.6 第二十七轮（用户纠正）：**没有任何角色处于选中状态**
-      // （draft === null，即用户点击当前高亮行取消选中 / 添加场景未选）
-      // 才设为无角色——**没点任何行**（draft === current，current 行仍
-      // 有 is-current 高亮 = 有选中）→ 保持原角色不动。
-      // 移除后由 characters.assign(null) 写入 removedIds 标记——标题
-      // 命中关键词也不会自然赋予"复活"（第二十七轮：原行为移除后
-      // charFor 立即重评 → 角色又回来 = 用户报的"还原设置前的角色"）
-      if (draft !== current && V.characters) {
-        // v0.5.7 多源：跨源赋予（目标源 = 角色所属源；新角色建于视频归属源）
-        V.characters.assignTo({ id: videoId, sourceId: src, title: title }, draft, meta);
-        V.toast.ok(draft ? ('已设为角色：' + draft) : '已移除角色');
+      if (!V.characters) { close(); return; }
+      var changed = draft.length !== currentManual.length
+        || draft.some(function (n) { return currentManual.indexOf(n) < 0; });
+      if (changed) {
+        V.characters.setManual(videoId, draft, meta, src);
+        V.toast.ok(draft.length ? ('已设置角色：' + draft.join('、')) : '已移除角色');
       }
       close();
     }
 
     var footBtns = [footBtn('回退', 'vshell-btn-secondary', function () {
-      draft = current;           // 放弃草稿：回打开时的角色，不保存、不退出
+      draft = currentManual.slice();   // 放弃草稿：回打开时的手动名单，不保存、不退出
       renderList();
     })];
     // v0.5.6 用户需求：去除「移除角色」按钮（想移除 = 点击当前角色行取消选中）
-    // v0.5.6 第五轮：**重置**（原「还原角色」，第六轮改名）——仅手动指定时
-    // 显示——去除手动指定，自然重评（可能恢复自然角色/冲突/无角色；用户
-    // check 点：原冲突的去除手动指定后自然又冲突）
+    // v0.5.6 第五轮：**重置**——仅手动指定时显示——去除手动指定，自然重评
     if (V.characters && V.characters.isManual && V.characters.isManual(videoId, src)) {
       footBtns.unshift(footBtn('重置', 'vshell-btn-secondary', function () {
         if (V.characters.unassign) {
@@ -7415,16 +7427,15 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       placeMarks();   // 收藏/待看切换后重新分配位置
     }
 
-    // 角色（v0.5.0，标签功能升级）：首次加载自动匹配赋予/冲突判定
-    // charFor 结果：char（已赋予，含自动匹配）/ conflict（多角色冲突）/ none
+    // 角色（v0.5.0，标签功能升级）：首次加载自动匹配赋予（v0.6.30 多角色）
+    // charFor 结果：char（已赋予/自动匹配，chars 数组）/ none
     var charsMod = V.characters;
     var cres = charsMod && charsMod.charFor ? charsMod.charFor(item.id, item) : { kind: 'none' };
-    var roleChar = cres.kind === 'char' ? cres.char : null;
-    var conflictChars = cres.kind === 'conflict' ? cres.chars : null;
+    var charList = cres.kind === 'char' ? (cres.chars || []) : [];
+    var conflictChars = null;   // v0.6.30：冲突概念废弃（一个视频可属多个角色）
 
-    // 标题高亮素材：已赋予角色 → 该角色关键词；冲突 → 候选角色名
-    var hlChars = roleChar ? [roleChar]
-      : (conflictChars ? conflictChars.map(function (n) { return { name: n }; }) : []);
+    // 标题高亮素材：全部已赋予角色的关键词
+    var hlChars = charList;
 
     // 角色角标（v0.5.0）：左上角——已赋予 → 角色图/白底首字；
     // 冲突 → 冲突 icon（可点击打开处理弹窗，用户拍板：不自动弹窗）；
@@ -7449,35 +7460,22 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         pubdate: item.pubdate || '',
       };
     }
-    /** 差量更新：重算 charFor → 重建角标（角色 box / 冲突按钮 / 无 → 隐藏） */
+    /** 差量更新：重算 charFor → 重建角标（v0.6.30：多个角色 icon 并排，
+     *  最多 3 个 + 超出「+N」计数；无角色 → 隐藏） */
     function renderTagIcons() {
       if (noTagIcon) { tagIcons.style.display = 'none'; return; }   // 角色主页：不显示角标
       var cres2 = charsMod && charsMod.charFor ? charsMod.charFor(item.id, item) : { kind: 'none' };
-      var roleChar2 = cres2.kind === 'char' ? cres2.char : null;
-      var conflictChars2 = cres2.kind === 'conflict' ? cres2.chars : null;
+      var charList2 = cres2.kind === 'char' ? (cres2.chars || []) : [];
       tagIcons.innerHTML = '';
-      if (conflictChars2) {
-        var cbox2 = V.utils.el('button', {
-          className: 'vsc-video-tag-icon is-conflict',
-          type: 'button',
-          title: '匹配到多个角色：' + conflictChars2.join('、') + '——点击选择',
-          'aria-label': '角色冲突，点击选择',
-        }, [V.utils.el('span', { className: 'codicon codicon-circle-slash' })]);
-        cbox2.addEventListener('click', function (e) {
-          e.preventDefault(); e.stopPropagation();
-          if (V.charPicker && V.charPicker.conflict) {
-            V.charPicker.conflict(item.id, item.title, conflictChars2, metaSnap(), item.sourceId);
-          }
-        });
-        tagIcons.appendChild(cbox2);
-      } else if (roleChar2) {
+      var MAX_ICONS = 3;
+      charList2.slice(0, MAX_ICONS).forEach(function (rc) {
         var box2 = V.utils.el('span', {
           className: 'vsc-video-tag-icon',
-          title: '角色：' + roleChar2.name,
+          title: '角色：' + rc.name,
         });
-        if (roleChar2.icon) {
+        if (rc.icon) {
           var img2 = V.utils.el('img', {
-            src: roleChar2.icon,
+            src: rc.icon,
             alt: '',
             loading: 'lazy',
             onerror: function () {
@@ -7490,15 +7488,21 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           // 无图角色（沿用 v0.3.3 惯例）：白底圆角方框 + 角色首字
           box2.classList.add('is-letter');
           box2.appendChild(V.utils.el('span', { className: 'vsc-video-tag-letter' },
-            String(roleChar2.name).charAt(0) || '?'));
+            String(rc.name).charAt(0) || '?'));
         }
         tagIcons.appendChild(box2);
+      });
+      if (charList2.length > MAX_ICONS) {
+        tagIcons.appendChild(V.utils.el('span', {
+          className: 'vsc-video-tag-icon is-more',
+          title: '角色：' + charList2.map(function (c) { return c.name; }).join('、'),
+        }, '+' + (charList2.length - MAX_ICONS)));
       }
-      tagIcons.style.display = (roleChar2 || conflictChars2) ? '' : 'none';
+      tagIcons.style.display = charList2.length ? '' : 'none';
       // v0.5.6 用户需求：无角色角标（display:none）时标题浮层不避让——
       // has-char 类驱动 CSS 的 padding-left:54px（兄弟选择器只认元素存在，
       // 不认 display:none，必须显式类切换）
-      tagIcons.classList.toggle('has-char', !!(roleChar2 || conflictChars2));
+      tagIcons.classList.toggle('has-char', !!charList2.length);
     }
     renderTagIcons();
 
@@ -7526,8 +7530,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     /** 差量更新：重算角色 → 重建标题关键词高亮（不改标题文本/href） */
     function renderTitle() {
       var cres2 = charsMod && charsMod.charFor ? charsMod.charFor(item.id, item) : { kind: 'none' };
-      var hlChars2 = cres2.kind === 'char' ? [cres2.char]
-        : (cres2.kind === 'conflict' ? cres2.chars.map(function (n) { return { name: n }; }) : []);
+      var hlChars2 = cres2.kind === 'char' ? (cres2.chars || []) : [];
       var nodes = highlightTitle(item.title, hlChars2);
       title.replaceChildren.apply(title, [].concat(nodes));
     }
@@ -7571,30 +7574,28 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (!cover) {
       var body = V.utils.el('div', { className: 'vsc-video-body' });
       var meta = V.utils.el('div', { className: 'vsc-video-meta' });
-      /** 差量更新：重建 meta 行（角色名按钮 / 冲突红字 / 无 → 日期 flex-end） */
+      /** 差量更新：重建 meta 行（v0.6.30：全部角色名按钮并排 / 无 → 日期 flex-end） */
       function renderMeta() {
         var cres2 = charsMod && charsMod.charFor ? charsMod.charFor(item.id, item) : { kind: 'none' };
-        var roleChar2 = cres2.kind === 'char' ? cres2.char : null;
-        var conflictChars2 = cres2.kind === 'conflict' ? cres2.chars : null;
+        var charList2 = cres2.kind === 'char' ? (cres2.chars || []) : [];
         meta.innerHTML = '';
-        if (!opts.noRoleMeta && roleChar2) {
-          meta.appendChild(V.utils.el('button', {
-            className: 'vsc-video-meta-owner',
-            type: 'button',
-            title: '角色：' + roleChar2.name + '——点击进入角色主页',
-            'aria-label': '角色：' + roleChar2.name + '，点击进入角色主页',
-            onclick: function (e) {
-              e.preventDefault(); e.stopPropagation();
-              if (V.router) V.router.nav('/role/' + encodeURIComponent(roleChar2.name));
-            },
-          }, [
-            // v0.5.4：角色名前显示 icon（用户需求：原 UP 名位置显示角色时加 icon）
-            V.utils.el('span', { className: 'codicon codicon-account vsc-video-meta-owner-icon' }),
-            V.utils.el('span', { className: 'vsc-video-meta-owner-name' }, roleChar2.name),
-          ]));
-        } else if (!opts.noRoleMeta && conflictChars2) {
-          // v0.5.4：冲突卡片原 UP 位置显示红字「冲突」（用户需求）
-          meta.appendChild(V.utils.el('span', { className: 'vsc-video-meta-owner is-conflict' }, '冲突'));
+        if (!opts.noRoleMeta && charList2.length) {
+          charList2.forEach(function (rc) {
+            meta.appendChild(V.utils.el('button', {
+              className: 'vsc-video-meta-owner',
+              type: 'button',
+              title: '角色：' + rc.name + '——点击进入角色主页',
+              'aria-label': '角色：' + rc.name + '，点击进入角色主页',
+              onclick: function (e) {
+                e.preventDefault(); e.stopPropagation();
+                if (V.router) V.router.nav('/role/' + encodeURIComponent(rc.name));
+              },
+            }, [
+              // v0.5.4：角色名前显示 icon（用户需求：原 UP 名位置显示角色时加 icon）
+              V.utils.el('span', { className: 'codicon codicon-account vsc-video-meta-owner-icon' }),
+              V.utils.el('span', { className: 'vsc-video-meta-owner-name' }, rc.name),
+            ]));
+          });
         }
         meta.appendChild(V.utils.el('span', { className: 'vsc-video-meta-date' },
           item.pubdate ? fmtDate(item.pubdate) : ''));
@@ -7602,7 +7603,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         // .vsc-video-meta 的 justify-content:space-between 会把唯一子元素推到
         // **左侧**（用户反馈"日期也被去除了"——实为位置漂移）；加 .no-owner
         // 类改 flex-end，日期回到右下角
-        meta.classList.toggle('no-owner', !roleChar2 && !conflictChars2);
+        meta.classList.toggle('no-owner', !charList2.length);
       }
       renderMeta();
       body.appendChild(title);
@@ -10330,50 +10331,38 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     };
   }
 
+  /** v0.6.30 多角色：返回 {els:[头像按钮...], roles:[角色...], conflict:false}——
+   *  全部角色各一个头像（点击进各自角色主页）；无角色 → + 号添加按钮 */
   function avatarFor(item) {
     var cres = (V.characters && V.characters.charFor)
       ? V.characters.charFor(item.id, item) : { kind: 'none' };
-    if (cres.kind === 'conflict') {
-      var names = cres.chars.slice();
-      var btn = V.utils.el('button', {
-        className: 'vshell-feed-avatar is-conflict',
-        type: 'button',
-        title: '匹配到多个角色：' + names.join('、') + '——点击选择',
-        'aria-label': '角色冲突，点击选择',
-      }, [V.utils.el('span', { className: 'codicon codicon-circle-slash' })]);
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        if (V.charPicker && V.charPicker.conflict) {
-          V.charPicker.conflict(item.id, item.title, names, itemMeta(item), item.sourceId);
+    var chars = cres.kind === 'char' ? (cres.chars || []) : [];
+    if (chars.length) {
+      var els = chars.map(function (c) {
+        // v0.5.3b：图片头像也可点击（v0.5.6：点击 → **角色主页**）
+        var btn = V.utils.el('button', {
+          className: 'vshell-feed-avatar',
+          type: 'button',
+          title: '角色：' + c.name + '——点击进入角色主页',
+          'aria-label': '角色主页：' + c.name,
+        });
+        var setLetter = function () {
+          btn.innerHTML = '';
+          btn.appendChild(V.utils.el('span', { className: 'vshell-feed-avatar-letter' },
+            String(c.name).charAt(0) || '?'));
+        };
+        if (c.icon) {
+          btn.appendChild(V.utils.el('img', { src: c.icon, alt: '', onerror: setLetter }));
+        } else {
+          setLetter();
         }
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          V.router.nav('/role/' + encodeURIComponent(c.name));
+        });
+        return btn;
       });
-      return { el: btn, role: null, conflict: true };
-    }
-    if (cres.kind === 'char') {
-      var c = cres.char;
-      // v0.5.3b：图片头像也可点击（用户需求"添加/冲突/图片都可点"）——
-      // v0.5.6：点击 → **角色主页**（用户需求；更改走 meta 行独立按钮）
-      var span = V.utils.el('button', {
-        className: 'vshell-feed-avatar',
-        type: 'button',
-        title: '角色：' + c.name + '——点击进入角色主页',
-        'aria-label': '角色主页：' + c.name,
-      });
-      var setLetter = function () {
-        span.innerHTML = '';
-        span.appendChild(V.utils.el('span', { className: 'vshell-feed-avatar-letter' },
-          String(c.name).charAt(0) || '?'));
-      };
-      if (c.icon) {
-        span.appendChild(V.utils.el('img', { src: c.icon, alt: '', onerror: setLetter }));
-      } else {
-        setLetter();
-      }
-      span.addEventListener('click', function (e) {
-        e.stopPropagation();
-        V.router.nav('/role/' + encodeURIComponent(c.name));
-      });
-      return { el: span, role: c, conflict: false };
+      return { els: els, roles: chars, conflict: false };
     }
     // v0.5.3：无角色 → + 号添加按钮（点击 → 添加角色弹窗）
     var addBtn = V.utils.el('button', {
@@ -10388,18 +10377,29 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         V.charPicker.edit(item.id, item.title, '添加角色', itemMeta(item), item.sourceId);
       }
     });
-    return { el: addBtn, role: null, conflict: false };
+    return { els: [addBtn], roles: [], conflict: false };
   }
 
-  /** meta 行内容（角色名/冲突文本 + v0.5.6 第十一轮：点击角色名 = 更改角色
-   *  （原独立「更改角色」按钮并入——用户需求 3）；角色名右侧 + 关注按钮；
-   *  初渲染与 updateRole 差量刷新共用（避免两处结构漂移）） */
+  /** meta 行内容（v0.6.30：全部角色名并排 + 独立「更改角色」编辑按钮；
+   *  关注按钮移除——多角色下语义模糊，关注入口保留在角色列表/角色主页。
+   *  初渲染与 updateRole 差量刷新共用） */
   function metaContent(av, item) {
     var children = [];
-    if (av.role) {
-      // 角色名 → 可点击（更改角色弹窗，同原 edit 按钮语义）
-      var nameBtn = V.utils.el('button', {
+    (av.roles || []).forEach(function (rc) {
+      children.push(V.utils.el('button', {
         className: 'vshell-feed-meta-name',
+        type: 'button',
+        title: '角色：' + rc.name + '——点击进入角色主页',
+        'aria-label': '角色主页：' + rc.name,
+        onclick: function (e) {
+          e.stopPropagation();
+          V.router.nav('/role/' + encodeURIComponent(rc.name));
+        },
+      }, rc.name));
+    });
+    if ((av.roles || []).length) {
+      children.push(V.utils.el('button', {
+        className: 'vshell-feed-meta-edit',
         type: 'button',
         title: '更改角色',
         'aria-label': '更改角色',
@@ -10409,37 +10409,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
             V.charPicker.edit(item.id, item.title, null, itemMeta(item), item.sourceId);
           }
         },
-      }, av.role.name);
-      children.push(nameBtn);
-      // 关注按钮（+ / ✓，角色级偏好；notify 驱动 updateRole 差量刷新）
-      var followed = V.characters && V.characters.isFollowed
-        ? V.characters.isFollowed(av.role.name) : false;
-      var followBtn = V.utils.el('button', {
-        className: 'vshell-feed-follow' + (followed ? ' is-followed' : ''),
-        type: 'button',
-        title: followed ? '取消关注' : '关注角色',
-        'aria-label': followed ? '取消关注' : '关注角色',
-        onclick: function (e) {
-          e.stopPropagation();
-          // v0.5.6 第十二轮需求 3：点击 pop 动画（背景色不变，只图标切换）。
-          // **必须先**拿容器引用：toggleFollow 的 notify → updateRole 用
-          // meta.textContent='' 同步重建 meta 行——重建后旧按钮 parentNode
-          // 已被断开（closest 会失败），但容器（feed）仍是同一元素
-          var feedEl = e.target && e.target.closest ? e.target.closest('.vshell-feed') : null;
-          V.characters.toggleFollow(av.role.name);
-          var nb = feedEl ? feedEl.querySelector('.vshell-feed-follow') : null;
-          if (nb) {
-            nb.classList.remove('is-popping');
-            void nb.offsetWidth;
-            nb.classList.add('is-popping');
-          }
-        },
-      }, V.utils.el('span', {
-        className: 'codicon ' + (followed ? 'codicon-check' : 'codicon-add'),
-      }));
-      children.push(followBtn);
-    } else if (av.conflict) {
-      children.push(V.utils.el('span', { className: 'vshell-feed-meta-name' }, '角色冲突'));
+      }, V.utils.el('span', { className: 'codicon codicon-edit' })));
     }
     return children;
   }
@@ -10679,7 +10649,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       var av = avatarFor(item);
       var info = V.utils.el('div', { className: 'vshell-feed-info' }, [
         V.utils.el('div', { className: 'vshell-feed-head' }, [
-          av.el,
+          // v0.6.30 多角色：头像容器（全部角色并排，更新时整体替换）
+          V.utils.el('div', { className: 'vshell-feed-head-avs' }, av.els),
           V.utils.el('div', { className: 'vshell-feed-head-text' }, [
             V.utils.el('div', { className: 'vshell-feed-title-row' }, [
               V.utils.el('div', { className: 'vshell-feed-title' }, item.title || ''),
@@ -10692,9 +10663,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
                 },
               }, V.utils.el('span', { className: 'codicon codicon-copy' })),
             ]),
-            V.utils.el('div', {
-              className: 'vshell-feed-meta' + (av.conflict ? ' is-conflict' : ''),
-            }, metaContent(av, item)),
+            V.utils.el('div', { className: 'vshell-feed-meta' }, metaContent(av, item)),
           ]),
         ]),
       ]);
@@ -10887,33 +10856,32 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         }
         return null;
       },
-      /** 头像回填/角色刷新（setFace / 角色变化后）→ 局部替换头像（不重建） */
+      /** 头像回填/角色刷新（setFace / 角色变化后）→ 局部替换头像（不重建）
+       *  v0.6.30：整体替换 .vshell-feed-head-avs 容器子节点（多角色） */
       updateFace: function (id) {
         for (var i = 0; i < slides.length; i++) {
           if (slides[i].item.id === id) {
-            var av = slides[i].root.querySelector('.vshell-feed-avatar');
+            var avHost = slides[i].root.querySelector('.vshell-feed-head-avs');
             var it = slides[i].item;
-            if (!av || !it) return;
-            var r = avatarFor(it);          // 角色/冲突/+ 号添加按钮（v0.5.3：无角色也有按钮）
-            if (r.el) av.replaceWith(r.el);
-            else av.remove();
+            if (!avHost || !it) return;
+            var r = avatarFor(it);
+            avHost.replaceChildren.apply(avHost, r.els);
             return;
           }
         }
       },
-      /** v0.5.5 用户需求：角色改动差量刷新（头像 + meta 角色名/冲突文本），
+      /** v0.5.5 用户需求：角色改动差量刷新（头像 + meta 角色名），
        *  不重建 feed（重建会回到列表第一个）。id 缺省 = 刷新全部 slide */
       updateRole: function (id) {
         for (var i = 0; i < slides.length; i++) {
           if (!id || slides[i].item.id === id) {
             var s = slides[i];
-            var av = s.root.querySelector('.vshell-feed-avatar');
-            if (!av) continue;
+            var avHost = s.root.querySelector('.vshell-feed-head-avs');
+            if (!avHost) continue;
             var r = avatarFor(s.item);
-            if (r.el) av.replaceWith(r.el);
+            avHost.replaceChildren.apply(avHost, r.els);
             var meta = s.root.querySelector('.vshell-feed-meta');
             if (meta) {
-              meta.className = 'vshell-feed-meta' + (r.conflict ? ' is-conflict' : '');
               meta.textContent = '';                     // 重建内容（含更改按钮）
               metaContent(r, s.item).forEach(function (n) { meta.appendChild(n); });
             }
@@ -14731,41 +14699,34 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         //    无角色信息才回落骨架（圆+条）；加载完成后由 renderUpRow 替换
         (function () {
           var upBody;
-          var snapChar = null, snapConflict = null;
+          // v0.6.30 多角色：快照标题实时 charFor → 全部角色头像+名字并排
+          var snapChars = [];
           if (snap && snap.title && V.characters && V.characters.charFor) {
             var cres3 = V.characters.charFor(mId, { id: mId, title: snap.title, sourceId: mSrc });
-            if (cres3.kind === 'char') snapChar = { name: cres3.char.name, icon: cres3.char.icon || '' };
-            else if (cres3.kind === 'conflict') snapConflict = cres3.chars;
+            if (cres3.kind === 'char') {
+              snapChars = (cres3.chars || []).map(function (c) {
+                return { name: c.name, icon: c.icon || '' };
+              });
+            }
           }
-          if (snapChar || snapConflict) {
-            var upAvatarEl = V.utils.el('span', {
-              className: 'vshell-detail-up-avatar' + (snapConflict ? ' is-conflict' : ''),
-            });
-            if (snapChar) {
+          if (snapChars.length) {
+            upBody = [];
+            snapChars.forEach(function (sc) {
+              var upAvatarEl = V.utils.el('span', { className: 'vshell-detail-up-avatar' });
               var setLetter3 = function () {
                 upAvatarEl.innerHTML = '';
                 upAvatarEl.appendChild(V.utils.el('span', {
                   className: 'vshell-detail-up-avatar-letter',
-                }, String(snapChar.name).charAt(0) || '?'));
+                }, String(sc.name).charAt(0) || '?'));
               };
-              if (snapChar.icon) {
-                upAvatarEl.appendChild(V.utils.el('img', {
-                  src: snapChar.icon, alt: '', onerror: setLetter3,
-                }));
+              if (sc.icon) {
+                upAvatarEl.appendChild(V.utils.el('img', { src: sc.icon, alt: '', onerror: setLetter3 }));
               } else {
                 setLetter3();
               }
-            } else {
-              upAvatarEl.appendChild(V.utils.el('span', {
-                className: 'codicon codicon-circle-slash',
-              }));
-            }
-            upBody = [
-              upAvatarEl,
-              V.utils.el('span', {
-                className: 'vshell-detail-up-name' + (snapConflict ? ' is-conflict' : ''),
-              }, snapChar ? snapChar.name : '角色冲突'),
-            ];
+              upBody.push(upAvatarEl);
+              upBody.push(V.utils.el('span', { className: 'vshell-detail-up-name' }, sc.name));
+            });
           } else {
             upBody = [
               V.utils.el('span', { className: 'vshell-skeleton-circle' }),
@@ -15158,103 +15119,73 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       }
       function renderUpRow() {
         upRow.innerHTML = '';
-        var owner2 = detail.owner || {};
         var cres2 = (V.characters && V.characters.charFor)
           ? V.characters.charFor(id, detail) : { kind: 'none' };
-        var roleChar2 = cres2.kind === 'char' ? cres2.char : null;
-        var conflictChars2 = cres2.kind === 'conflict' ? cres2.chars : null;
-        var avatar2;
-        if (conflictChars2) {
-          avatar2 = V.utils.el('button', {
-            className: 'vshell-detail-up-avatar is-conflict',
-            type: 'button',
-            title: '匹配到多个角色：' + conflictChars2.join('、') + '——点击选择',
-            'aria-label': '角色冲突，点击选择',
-          }, [V.utils.el('span', { className: 'codicon codicon-circle-slash' })]);
-          avatar2.addEventListener('click', function () {
-            if (V.charPicker && V.charPicker.conflict) {
-              V.charPicker.conflict(id, detail.title, conflictChars2, detailMeta(), detail.sourceId);
+        // v0.6.30 多角色：每个角色一组头像+名字（点击各自进主页），
+        // 末尾独立「更改角色」铅笔按钮（单角色时代名字点击即更改）
+        var charList2 = cres2.kind === 'char' ? (cres2.chars || []) : [];
+        if (charList2.length) {
+          charList2.forEach(function (rc) {
+            var av2 = V.utils.el('button', {
+              className: 'vshell-detail-up-avatar',
+              type: 'button',
+              title: '角色：' + rc.name + '——点击进入角色主页',
+              'aria-label': '角色主页：' + rc.name,
+            });
+            av2.addEventListener('click', function () {
+              V.router.nav('/role/' + encodeURIComponent(rc.name));
+            });
+            var setLetter2 = function () {
+              av2.innerHTML = '';
+              av2.appendChild(V.utils.el('span', { className: 'vshell-detail-up-avatar-letter' },
+                String(rc.name).charAt(0) || '?'));
+            };
+            if (rc.icon) {
+              av2.appendChild(V.utils.el('img', { src: rc.icon, alt: '', onerror: setLetter2 }));
+            } else {
+              setLetter2();
             }
+            upRow.appendChild(av2);
+            upRow.appendChild(V.utils.el('button', {
+              className: 'vshell-detail-up-name',
+              type: 'button',
+              title: '角色：' + rc.name + '——点击进入角色主页',
+              'aria-label': '角色主页：' + rc.name,
+              onclick: function (e) {
+                e.preventDefault(); e.stopPropagation();
+                V.router.nav('/role/' + encodeURIComponent(rc.name));
+              },
+            }, rc.name));
           });
-        } else if (roleChar2) {
-          // v0.5.6：已有角色头像 = 角色主页入口（点击进入主页；更改走独立按钮）
-          avatar2 = V.utils.el('button', {
-            className: 'vshell-detail-up-avatar',
+          upRow.appendChild(V.utils.el('button', {
+            className: 'vshell-detail-up-edit',
             type: 'button',
-            title: '角色：' + roleChar2.name + '——点击进入角色主页',
-            'aria-label': '角色主页：' + roleChar2.name,
-          });
-          avatar2.addEventListener('click', function () {
-            V.router.nav('/role/' + encodeURIComponent(roleChar2.name));
-          });
-          var setLetter2 = function () {
-            avatar2.innerHTML = '';
-            avatar2.appendChild(V.utils.el('span', { className: 'vshell-detail-up-avatar-letter' },
-              String(roleChar2.name).charAt(0) || '?'));
-          };
-          if (roleChar2.icon) {
-            avatar2.appendChild(V.utils.el('img', { src: roleChar2.icon, alt: '', onerror: setLetter2 }));
-          } else {
-            setLetter2();
-          }
+            title: '更改角色',
+            'aria-label': '更改角色',
+            onclick: function () {
+              if (V.charPicker && V.charPicker.edit) {
+                V.charPicker.edit(id, detail.title, '更改角色', detailMeta(), detail.sourceId);
+              }
+            },
+          }, V.utils.el('span', { className: 'codicon codicon-edit' })));
         } else {
           // v0.5.1：无角色 → 不显示 UP 头像（用户需求）；保留圆形 → 显示 + 号按钮，
           // 文本「添加角色」，点击唤出添加角色 UI（角色列表选择）
-          avatar2 = V.utils.el('button', {
+          var avAdd = V.utils.el('button', {
             className: 'vshell-detail-up-avatar is-add',
             type: 'button',
             title: '添加角色',
             'aria-label': '添加角色',
           }, [V.utils.el('span', { className: 'codicon codicon-add' })]);
-          avatar2.addEventListener('click', function () {
+          avAdd.addEventListener('click', function () {
             if (V.charPicker && V.charPicker.edit) {
               V.charPicker.edit(id, detail.title, '添加角色', detailMeta(), detail.sourceId);
             }
           });
-        }
-        upRow.appendChild(avatar2);
-        // v0.5.3：冲突时名字区显示「角色冲突」文本（用户需求）
-        // v0.5.6 第十一轮（用户需求 3）：已有角色时名字可点击（更改角色，
-        // 取代原独立编辑按钮）+ 右侧关注按钮；冲突/无角色保持文本
-        if (roleChar2) {
-          upRow.appendChild(V.utils.el('button', {
-            className: 'vshell-detail-up-name',
-            type: 'button',
-            title: '更改角色',
-            'aria-label': '更改角色',
-            onclick: function () {
-              if (V.charPicker && V.charPicker.edit) V.charPicker.edit(id, detail.title, null, detailMeta(), detail.sourceId);
-            },
-          }, roleChar2.name));
-          var followed2 = V.characters && V.characters.isFollowed
-            ? V.characters.isFollowed(roleChar2.name) : false;
-          var followBtn2 = V.utils.el('button', {
-            className: 'vshell-detail-up-follow' + (followed2 ? ' is-followed' : ''),
-            type: 'button',
-            title: followed2 ? '取消关注' : '关注角色',
-            'aria-label': followed2 ? '取消关注' : '关注角色',
-            onclick: function (e) {
-              // v0.5.6 第十二轮需求 3：pop 动画（背景不变）。**必须先**拿
-              // 容器引用：toggleFollow 的 notify 触发 renderUpRow 同步重建
-              // up 行——重建后旧按钮 parentNode 断开（closest 失败）
-              var upEl = e.target && e.target.closest
-                ? e.target.closest('.vshell-detail-up') : null;
-              V.characters.toggleFollow(roleChar2.name);
-              var nb = upEl ? upEl.querySelector('.vshell-detail-up-follow') : null;
-              if (nb) {
-                nb.classList.remove('is-popping');
-                void nb.offsetWidth;
-                nb.classList.add('is-popping');
-              }
-            },
-          }, V.utils.el('span', {
-            className: 'codicon ' + (followed2 ? 'codicon-check' : 'codicon-add'),
-          }));
-          upRow.appendChild(followBtn2);
-        } else {
+          upRow.appendChild(avAdd);
           upRow.appendChild(V.utils.el('span', {
-            className: 'vshell-detail-up-name' + (conflictChars2 ? ' is-conflict' : ''),
-          }, conflictChars2 ? '角色冲突' : '添加角色'));
+            className: 'vshell-detail-up-name',
+          }, '添加角色'));
         }
       }
       renderUpRow();
@@ -16806,6 +16737,21 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   'use strict';
   var V = window.VShell = window.VShell || {};
 
+  /** v0.6.30 多源同名角色合并：角色页用**合并条目**（listAll = 激活源同名
+   *  角色的 keywords/exclusions 并集——搜索时合并关键词和排除词；各源
+   *  实际数据不修改，仅整合展示/匹配时合并）。listAll 找不到（角色在未
+   *  激活源）→ 兜底 find（单源条目）。 */
+  function mergedRole(name) {
+    if (!name) return null;
+    try {
+      var all = V.characters ? V.characters.list() : [];
+      for (var i = 0; i < all.length; i++) {
+        if (all[i] && all[i].name === name) return all[i];
+      }
+    } catch (e) { /* noop */ }
+    return V.characters && V.characters.find ? V.characters.find(name) : null;
+  }
+
   function mount(outlet, params) {
     // v0.5.6 第十三轮需求 8：全屏（抖音刷）下点击进入角色主页 → 自动
     // 退出全屏（原生 fullscreen 走 top layer，角色页会被盖在全屏之下）
@@ -16815,7 +16761,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     // v0.5.6 第十三轮：router 已在 parse 层统一解码 segs，这里不再
     // 二次 decode（encodeURIComponent 过的 name 若含 % 会双解码崩溃）
     var name = params.name || '';
-    var role = V.characters && V.characters.find ? V.characters.find(name) : null;
+    // v0.6.30：合并条目（多源同名角色的关键词/排除词并集——仅匹配/搜索
+    // 时合并，各源实际数据不修改）
+    var role = V.characters && V.characters.find ? mergedRole(name) : null;
     var state = { done: false };
     var page = V.utils.el('div', { className: 'vshell-page vshell-role-page' });
     outlet.appendChild(page);
@@ -17353,10 +17301,21 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
               // v0.5.10：排除词过滤放进 opts.filter——source-feed 的 filter
               // 在网络拉取（pullOne）与缓存加载（loadCache）两路都会执行；
               // 否则加排除词后已缓存（关键词命中但含排除词）的视频仍会显示。
+              // v0.6.30：排除词用**合并条目**（多源同名角色排除词并集）
               var excls = role.exclusions;
               if (excls && excls.length) {
                 out = out.filter(function (it) {
                   return !exclHit(it.title, excls);
+                });
+              }
+              // v0.6.30 用户拍板：「搜索完成并筛后，为每个列表中的视频添加
+              // 当前的角色」——网络拉取与缓存加载两路都补赋（跨源：a 源
+              // 视频 → a 源角色，目标源无同名先建副本复制头像/背景/关键词/
+              // 排除词；只写 videoChars **不进** charVideos 手动段快照，
+              // 角色页「手动添加」段只含手动赋予）。assignAuto 幂等。
+              if (out.length && V.characters && V.characters.assignAuto) {
+                out.forEach(function (it) {
+                  try { V.characters.assignAuto(it, role.name); } catch (e) { /* noop */ }
                 });
               }
               return out;
@@ -21137,6 +21096,19 @@ html.vshell::-webkit-scrollbar {
   pointer-events: auto;
   cursor: pointer;
 }
+/* v0.6.30 多角色：超出 MAX_ICONS(3) 的「+N」计数徽标（小号） */
+.vshell .vsc-video-tag-icon.is-more {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
 .vsc-video-tag-icon img {
   width: 100%;
   height: 100%;
@@ -22002,6 +21974,30 @@ html.vshell::-webkit-scrollbar {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.8);
   margin-top: 2px;
+}
+/* v0.6.30 多角色：头像容器（全部角色头像竖排并排；更新时整体替换） */
+.vshell-feed-head-avs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+/* v0.6.30：meta 行「更改角色」铅笔按钮（多角色下角色名点击进主页） */
+.vshell .vshell-feed-meta-edit {
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0.75;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.vshell .vshell-feed-meta-edit:hover {
+  opacity: 1;
+  color: var(--vscode-textLink-foreground, #4daafc);
 }
 /* v0.5.6 第十一轮：角色名改**按钮**（点击 = 更改角色）——继承 meta 行
    字号/省略；.vshell 前缀压过 base .vshell button 重置（0,1,1）；
@@ -23599,6 +23595,24 @@ html.vshell::-webkit-scrollbar {
   border-color: var(--vscode-panel-border);
   box-shadow: none;
 }
+/* v0.6.30 自动角色：灰显提示（点击 = 转手动角色）；行尾「自动」小徽标 */
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-auto {
+  opacity: 0.6;
+}
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-auto:hover {
+  opacity: 0.9;
+}
+.vshell-tag-row-auto {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 4px;
+  padding: 1px 6px;
+  pointer-events: none;
+}
 /* 关注按钮（角色列表浮窗长条右侧；v0.5.6 第十二轮需求 3：is-followed
    背景不变——保持半透明底，只图标变对勾） */
 .vshell-char-picker .vshell-tag-follow {
@@ -24680,6 +24694,27 @@ body.vshell-dragging a { pointer-events: none; }
   font-size: 15px;
   font-weight: 600;
   line-height: 1;
+}
+/* v0.6.30 多角色：独立「更改角色」铅笔按钮（多角色下角色名点击进主页，
+   编辑走此按钮——原「名字点击即更改」只适用单角色时代） */
+.vshell .vshell-detail-up-edit {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.4));
+  background: transparent;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  margin-left: 2px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.vshell .vshell-detail-up-edit:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+  border-color: var(--vscode-focusBorder);
 }
 /* v0.5.6 第十一轮：详情页「更改角色」编辑按钮与抖音刷「更改角色」按钮
    已并入角色名点击（用户需求 3：点击角色名 = 更改角色）——相关 CSS 移除 */

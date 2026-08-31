@@ -907,6 +907,19 @@
   pointer-events: auto;
   cursor: pointer;
 }
+/* v0.6.30 多角色：超出 MAX_ICONS(3) 的「+N」计数徽标（小号） */
+.vshell .vsc-video-tag-icon.is-more {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
 .vsc-video-tag-icon img {
   width: 100%;
   height: 100%;
@@ -1772,6 +1785,30 @@
   font-size: 12px;
   color: rgba(255, 255, 255, 0.8);
   margin-top: 2px;
+}
+/* v0.6.30 多角色：头像容器（全部角色头像竖排并排；更新时整体替换） */
+.vshell-feed-head-avs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+/* v0.6.30：meta 行「更改角色」铅笔按钮（多角色下角色名点击进主页） */
+.vshell .vshell-feed-meta-edit {
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0.75;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.vshell .vshell-feed-meta-edit:hover {
+  opacity: 1;
+  color: var(--vscode-textLink-foreground, #4daafc);
 }
 /* v0.5.6 第十一轮：角色名改**按钮**（点击 = 更改角色）——继承 meta 行
    字号/省略；.vshell 前缀压过 base .vshell button 重置（0,1,1）；
@@ -3368,6 +3405,24 @@
 .vshell-char-picker .vshell-char-list .vshell-tag-row.is-current:hover {
   border-color: var(--vscode-panel-border);
   box-shadow: none;
+}
+/* v0.6.30 自动角色：灰显提示（点击 = 转手动角色）；行尾「自动」小徽标 */
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-auto {
+  opacity: 0.6;
+}
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-auto:hover {
+  opacity: 0.9;
+}
+.vshell-tag-row-auto {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 4px;
+  padding: 1px 6px;
+  pointer-events: none;
 }
 /* 关注按钮（角色列表浮窗长条右侧；v0.5.6 第十二轮需求 3：is-followed
    背景不变——保持半透明底，只图标变对勾） */

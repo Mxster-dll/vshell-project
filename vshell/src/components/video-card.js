@@ -334,16 +334,15 @@
       placeMarks();   // 收藏/待看切换后重新分配位置
     }
 
-    // 角色（v0.5.0，标签功能升级）：首次加载自动匹配赋予/冲突判定
-    // charFor 结果：char（已赋予，含自动匹配）/ conflict（多角色冲突）/ none
+    // 角色（v0.5.0，标签功能升级）：首次加载自动匹配赋予（v0.6.30 多角色）
+    // charFor 结果：char（已赋予/自动匹配，chars 数组）/ none
     var charsMod = V.characters;
     var cres = charsMod && charsMod.charFor ? charsMod.charFor(item.id, item) : { kind: 'none' };
-    var roleChar = cres.kind === 'char' ? cres.char : null;
-    var conflictChars = cres.kind === 'conflict' ? cres.chars : null;
+    var charList = cres.kind === 'char' ? (cres.chars || []) : [];
+    var conflictChars = null;   // v0.6.30：冲突概念废弃（一个视频可属多个角色）
 
-    // 标题高亮素材：已赋予角色 → 该角色关键词；冲突 → 候选角色名
-    var hlChars = roleChar ? [roleChar]
-      : (conflictChars ? conflictChars.map(function (n) { return { name: n }; }) : []);
+    // 标题高亮素材：全部已赋予角色的关键词
+    var hlChars = charList;
 
     // 角色角标（v0.5.0）：左上角——已赋予 → 角色图/白底首字；
     // 冲突 → 冲突 icon（可点击打开处理弹窗，用户拍板：不自动弹窗）；
@@ -368,35 +367,22 @@
         pubdate: item.pubdate || '',
       };
     }
-    /** 差量更新：重算 charFor → 重建角标（角色 box / 冲突按钮 / 无 → 隐藏） */
+    /** 差量更新：重算 charFor → 重建角标（v0.6.30：多个角色 icon 并排，
+     *  最多 3 个 + 超出「+N」计数；无角色 → 隐藏） */
     function renderTagIcons() {
       if (noTagIcon) { tagIcons.style.display = 'none'; return; }   // 角色主页：不显示角标
       var cres2 = charsMod && charsMod.charFor ? charsMod.charFor(item.id, item) : { kind: 'none' };
-      var roleChar2 = cres2.kind === 'char' ? cres2.char : null;
-      var conflictChars2 = cres2.kind === 'conflict' ? cres2.chars : null;
+      var charList2 = cres2.kind === 'char' ? (cres2.chars || []) : [];
       tagIcons.innerHTML = '';
-      if (conflictChars2) {
-        var cbox2 = V.utils.el('button', {
-          className: 'vsc-video-tag-icon is-conflict',
-          type: 'button',
-          title: '匹配到多个角色：' + conflictChars2.join('、') + '——点击选择',
-          'aria-label': '角色冲突，点击选择',
-        }, [V.utils.el('span', { className: 'codicon codicon-circle-slash' })]);
-        cbox2.addEventListener('click', function (e) {
-          e.preventDefault(); e.stopPropagation();
-          if (V.charPicker && V.charPicker.conflict) {
-            V.charPicker.conflict(item.id, item.title, conflictChars2, metaSnap(), item.sourceId);
-          }
-        });
-        tagIcons.appendChild(cbox2);
-      } else if (roleChar2) {
+      var MAX_ICONS = 3;
+      charList2.slice(0, MAX_ICONS).forEach(function (rc) {
         var box2 = V.utils.el('span', {
           className: 'vsc-video-tag-icon',
-          title: '角色：' + roleChar2.name,
+          title: '角色：' + rc.name,
         });
-        if (roleChar2.icon) {
+        if (rc.icon) {
           var img2 = V.utils.el('img', {
-            src: roleChar2.icon,
+            src: rc.icon,
             alt: '',
             loading: 'lazy',
             onerror: function () {
@@ -409,15 +395,21 @@
           // 无图角色（沿用 v0.3.3 惯例）：白底圆角方框 + 角色首字
           box2.classList.add('is-letter');
           box2.appendChild(V.utils.el('span', { className: 'vsc-video-tag-letter' },
-            String(roleChar2.name).charAt(0) || '?'));
+            String(rc.name).charAt(0) || '?'));
         }
         tagIcons.appendChild(box2);
+      });
+      if (charList2.length > MAX_ICONS) {
+        tagIcons.appendChild(V.utils.el('span', {
+          className: 'vsc-video-tag-icon is-more',
+          title: '角色：' + charList2.map(function (c) { return c.name; }).join('、'),
+        }, '+' + (charList2.length - MAX_ICONS)));
       }
-      tagIcons.style.display = (roleChar2 || conflictChars2) ? '' : 'none';
+      tagIcons.style.display = charList2.length ? '' : 'none';
       // v0.5.6 用户需求：无角色角标（display:none）时标题浮层不避让——
       // has-char 类驱动 CSS 的 padding-left:54px（兄弟选择器只认元素存在，
       // 不认 display:none，必须显式类切换）
-      tagIcons.classList.toggle('has-char', !!(roleChar2 || conflictChars2));
+      tagIcons.classList.toggle('has-char', !!charList2.length);
     }
     renderTagIcons();
 
@@ -445,8 +437,7 @@
     /** 差量更新：重算角色 → 重建标题关键词高亮（不改标题文本/href） */
     function renderTitle() {
       var cres2 = charsMod && charsMod.charFor ? charsMod.charFor(item.id, item) : { kind: 'none' };
-      var hlChars2 = cres2.kind === 'char' ? [cres2.char]
-        : (cres2.kind === 'conflict' ? cres2.chars.map(function (n) { return { name: n }; }) : []);
+      var hlChars2 = cres2.kind === 'char' ? (cres2.chars || []) : [];
       var nodes = highlightTitle(item.title, hlChars2);
       title.replaceChildren.apply(title, [].concat(nodes));
     }
@@ -490,30 +481,28 @@
     if (!cover) {
       var body = V.utils.el('div', { className: 'vsc-video-body' });
       var meta = V.utils.el('div', { className: 'vsc-video-meta' });
-      /** 差量更新：重建 meta 行（角色名按钮 / 冲突红字 / 无 → 日期 flex-end） */
+      /** 差量更新：重建 meta 行（v0.6.30：全部角色名按钮并排 / 无 → 日期 flex-end） */
       function renderMeta() {
         var cres2 = charsMod && charsMod.charFor ? charsMod.charFor(item.id, item) : { kind: 'none' };
-        var roleChar2 = cres2.kind === 'char' ? cres2.char : null;
-        var conflictChars2 = cres2.kind === 'conflict' ? cres2.chars : null;
+        var charList2 = cres2.kind === 'char' ? (cres2.chars || []) : [];
         meta.innerHTML = '';
-        if (!opts.noRoleMeta && roleChar2) {
-          meta.appendChild(V.utils.el('button', {
-            className: 'vsc-video-meta-owner',
-            type: 'button',
-            title: '角色：' + roleChar2.name + '——点击进入角色主页',
-            'aria-label': '角色：' + roleChar2.name + '，点击进入角色主页',
-            onclick: function (e) {
-              e.preventDefault(); e.stopPropagation();
-              if (V.router) V.router.nav('/role/' + encodeURIComponent(roleChar2.name));
-            },
-          }, [
-            // v0.5.4：角色名前显示 icon（用户需求：原 UP 名位置显示角色时加 icon）
-            V.utils.el('span', { className: 'codicon codicon-account vsc-video-meta-owner-icon' }),
-            V.utils.el('span', { className: 'vsc-video-meta-owner-name' }, roleChar2.name),
-          ]));
-        } else if (!opts.noRoleMeta && conflictChars2) {
-          // v0.5.4：冲突卡片原 UP 位置显示红字「冲突」（用户需求）
-          meta.appendChild(V.utils.el('span', { className: 'vsc-video-meta-owner is-conflict' }, '冲突'));
+        if (!opts.noRoleMeta && charList2.length) {
+          charList2.forEach(function (rc) {
+            meta.appendChild(V.utils.el('button', {
+              className: 'vsc-video-meta-owner',
+              type: 'button',
+              title: '角色：' + rc.name + '——点击进入角色主页',
+              'aria-label': '角色：' + rc.name + '，点击进入角色主页',
+              onclick: function (e) {
+                e.preventDefault(); e.stopPropagation();
+                if (V.router) V.router.nav('/role/' + encodeURIComponent(rc.name));
+              },
+            }, [
+              // v0.5.4：角色名前显示 icon（用户需求：原 UP 名位置显示角色时加 icon）
+              V.utils.el('span', { className: 'codicon codicon-account vsc-video-meta-owner-icon' }),
+              V.utils.el('span', { className: 'vsc-video-meta-owner-name' }, rc.name),
+            ]));
+          });
         }
         meta.appendChild(V.utils.el('span', { className: 'vsc-video-meta-date' },
           item.pubdate ? fmtDate(item.pubdate) : ''));
@@ -521,7 +510,7 @@
         // .vsc-video-meta 的 justify-content:space-between 会把唯一子元素推到
         // **左侧**（用户反馈"日期也被去除了"——实为位置漂移）；加 .no-owner
         // 类改 flex-end，日期回到右下角
-        meta.classList.toggle('no-owner', !roleChar2 && !conflictChars2);
+        meta.classList.toggle('no-owner', !charList2.length);
       }
       renderMeta();
       body.appendChild(title);

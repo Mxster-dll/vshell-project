@@ -471,6 +471,27 @@
   font-weight: 600;
   line-height: 1;
 }
+/* v0.6.30 多角色：独立「更改角色」铅笔按钮（多角色下角色名点击进主页，
+   编辑走此按钮——原「名字点击即更改」只适用单角色时代） */
+.vshell .vshell-detail-up-edit {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.4));
+  background: transparent;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  margin-left: 2px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.vshell .vshell-detail-up-edit:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+  border-color: var(--vscode-focusBorder);
+}
 /* v0.5.6 第十一轮：详情页「更改角色」编辑按钮与抖音刷「更改角色」按钮
    已并入角色名点击（用户需求 3：点击角色名 = 更改角色）——相关 CSS 移除 */
 

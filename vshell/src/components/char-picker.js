@@ -1,28 +1,19 @@
 /* ============================================================
- * char-picker — 角色选择弹窗（v0.5.0 角色系统；v0.5.4 草稿模式重构）
+ * char-picker — 角色选择弹窗（v0.5.0 角色系统；v0.5.4 草稿模式重构；
+ * v0.6.30 多角色重构——冲突机制废弃，一个视频可属多个角色）
  *
- * 三个入口（复用 .vshell-modal 弹窗体系）：
- * 1) conflict(videoId, title, charNames)——冲突处理：
- *    全部角色（冲突候选置顶 + 红色高亮），点击选定
- * 2) edit(videoId, title)——手动管理（用户拍板：详情页弹窗）：
- *    全部角色（当前赋予 is-current 高亮），点击 = 赋予/更换
- * 3) list()——角色列表（v0.5.6 第十一轮，用户需求 1）：
+ * 入口（复用 .vshell-modal 弹窗体系）：
+ * 1) edit(videoId, title, headTitle?, meta?, srcId?)——手动管理（唯一入口）：
+ *    全部角色列表；**手动名单**多选 toggle（is-current 高亮），自动角色
+ *    灰显「自动」徽标（点击转手动）；完成 → setManual 整体提交
+ * 2) list()——角色列表（v0.5.6 第十一轮，用户需求 1）：
  *    导航栏「角色」按钮入口——两列长条（背景图），右上角「打开角色
  *    管理」按钮，每角色右侧关注按钮；点击长条进角色主页
+ * （conflict 冲突弹窗 v0.6.30 删除——命中多个角色全部自动赋予）
  *
- * v0.5.4 草稿模式（用户需求 4/6）：
- *  - 点击角色行 / 不指定 / 移除角色 都只改**草稿高亮**，不写 store、不退出
- *  - 退出方式只有三种：点「完成」（保存退出）、点浮窗外区域（保存退出）、
- *    点「回退」（v0.5.6 第六轮改名，原「还原」——放弃草稿、不保存、弹窗
- *    继续——撤销到打开时的状态）
- *  - 添加角色场景（无角色）无「移除角色」按钮（用户需求 4 之前拍板）
- * v0.5.6 第六轮（用户需求 5 改名）：「还原角色」→「重置」（去除手动指定）、
- *  「还原」→「回退」（放弃草稿）——语义不再重复
- * v0.5.6 第十一轮（用户需求 1）：
- *  - 角色列表显示改为**两列长条**：背景 = 角色背景图（默认 SVG/自定义），
- *    左侧头像 + 名称；选中高亮重新设计（focusBorder 蓝边框 + ✓ 徽章），
- *    冲突标识复用（红竖条 + 红字）
- *  - charRow 外层由 button 改 div（长条内含关注按钮——button 不能嵌套）
+ * v0.5.4 草稿模式：点击角色行只改**草稿高亮**，不写 store、不退出；
+ * 退出方式只有三种：点「完成」（保存退出）、点浮窗外区域（保存退出）、
+ * 点「回退」（放弃草稿、不保存、弹窗继续）
  * ============================================================ */
 (function () {
   'use strict';
@@ -163,82 +154,28 @@
     }, label);
   }
 
-  /** 冲突处理：全部角色（冲突候选置顶 + 红色高亮，v0.5.3）
-   *  v0.5.4 草稿模式：点击行只选中草稿；完成/外部点击 = resolveConflict(draft)；
-   *  「回退」= 放弃草稿（回未选，不保存）
-   *  v0.5.6：meta（视频快照）可选——resolve 时写入角色主页「手动添加」列表 */
-  function conflict(videoId, title, charNames, meta, srcId) {
-    if (panel) close();
-    var src = srcId || null;
-    var chars = (V.characters ? V.characters.list() : []);
-    var candNames = charNames || [];
-    var ordered = chars.slice().sort(function (a, b) {
-      var ai = candNames.indexOf(a.name), bi = candNames.indexOf(b.name);
-      return (ai < 0 ? 1 : 0) - (bi < 0 ? 1 : 0);
-    });
-    var sub = '「' + (title || videoId) + '」匹配到多个角色，请选择这个视频的角色';
-    var list = V.utils.el('div', { className: 'vshell-tag-list vshell-char-list' });
-    var draft = null;   // 草稿（null = 不指定）——v0.5.4 不写 store 直到退出
+  /** 冲突处理——v0.6.30 废弃（无冲突概念，一个视频可属多个角色）。
+   *  charFor 命中多个 → 全部自动赋予；旧调用方（video-card/feed/detail
+   *  的 is-conflict 分支）已随多角色改造移除。保留空实现防外部引用崩。 */
+  function conflict() { /* noop */ }
 
-    function renderList() {
-      list.innerHTML = '';
-      if (!ordered.length) {
-        list.appendChild(V.utils.el('div', { className: 'vshell-modal-sub' },
-          '还没有角色——先到导航栏「角色」添加'));
-        return;
-      }
-      ordered.forEach(function (c) {
-        var isCand = candNames.indexOf(c.name) >= 0;
-        var row = charRow(c, function () {
-          // v0.5.4：只改草稿，不 resolve、不退出
-          draft = draft === c.name ? null : c.name;
-          renderList();
-        }, { title: '选择角色：' + c.name });
-        if (isCand) row.classList.add('is-conflict');
-        if (c.name === draft) row.classList.add('is-current');
-        list.appendChild(row);
-      });
-    }
-    renderList();
-
-    function applyAndClose() {
-      if (V.characters && draft !== null) {
-        // v0.5.7 多源：跨源赋予（目标源 = 角色所属源）
-        V.characters.assignTo({ id: videoId, sourceId: src, title: title }, draft, meta);
-        V.toast.ok('已设为角色：' + draft);
-      } else if (V.characters) {
-        // draft === null：不指定（清冲突，保持无角色）
-        V.characters.resolveConflict(videoId, null, meta, src);
-        V.toast.info('不指定角色');
-      }
-      close();
-    }
-    build('选择角色', sub, list, [
-      // v0.5.6 追加：去除「不指定」按钮（用户需求）——想不指定 = 点击当前
-      // 高亮行取消选中（draft=null）或「回退」，完成时 resolveConflict(null)
-      // v0.5.6 第六轮：文案改名（用户需求 5）「还原」→「回退」
-      footBtn('回退', 'vshell-btn-secondary', function () {
-        draft = null;            // 放弃草稿（打开时即未选），不保存、不退出
-        renderList();
-      }),
-      footBtn('完成', 'vshell-btn-primary', applyAndClose),
-    ], applyAndClose);
-    V.charPicker._close = applyAndClose;
-  }
-
-  /** 手动更改（草稿模式 v0.5.4）：全部角色（当前赋予 is-current 高亮）
+  /** 手动更改（草稿模式 v0.5.4；v0.6.30 多角色重构）：
+   *  - 草稿 = **手动角色名单**（数组，可多选）：点击行 toggle 加入/移出
+   *  - 自动角色（已拥有但不在手动名单）显示灰色「自动」徽标，点击 = 转手动
+   *  - 完成 → setManual(整体提交手动名单)——原自动角色保留不因编辑消失
+   *  - 全部取消选中 = 移除全部手动角色（自动角色若存在仍保留）
    *  headTitle 可选（默认'更改角色'；无角色场景传'添加角色'）
-   *  v0.5.5：不再显示 sub 文案「xxxx——点击角色赋予/更换」（用户需求）
-   *  v0.5.6 追加：「编辑角色」→「更改角色」（用户需求，icon 同步换 arrow-swap）
-   *  v0.5.6 第六轮：按钮文案「还原」→「回退」、「还原角色」→「重置」（用户需求 5）
-   *  meta（视频快照）可选——assign 时写入角色主页「手动添加」列表
-   *  v0.5.7 多源：srcId = 视频归属源——角色列表 = 并集（list()）；确认走
-   *  assignTo（目标源 = 角色所属源，跨源添加自动在目标源建立角色） */
+   *  v0.5.6 第六轮：按钮文案「还原」→「回退」、「还原角色」→「重置」
+   *  meta（视频快照）可选——setManual 时写入角色主页「手动添加」列表
+   *  v0.5.7 多源：srcId = 视频归属源——角色列表 = 并集（list()）；
+   *  跨源添加（目标源无同名角色）自动在目标源建立副本（ensureRoleOn） */
   function edit(videoId, title, headTitle, meta, srcId) {
     if (panel) close();
     var src = srcId || null;
-    var current = V.characters ? V.characters.getChar(videoId, src) : null;   // 实际角色（打开时）
-    var draft = current;                                                  // 草稿
+    var currentManual = V.characters && V.characters.getManual
+      ? V.characters.getManual(videoId, src) : [];     // 手动名单（打开时）
+    var allOwned = V.characters ? V.characters.getChar(videoId, src) : null;  // 全部角色（含自动）
+    var draft = currentManual.slice();                 // 草稿（手动名单）
     var list = V.utils.el('div', { className: 'vshell-tag-list vshell-char-list' });
 
     function renderList() {
@@ -250,42 +187,44 @@
         return;
       }
       chars.forEach(function (c) {
-        var on = c.name === draft;
+        var on = draft.indexOf(c.name) >= 0;
+        var isAuto = allOwned && allOwned.indexOf(c.name) >= 0 && !on;
         var row = charRow(c, function () {
-          // v0.5.4：只改草稿，不 assign、不退出
-          draft = on ? null : c.name;
+          // v0.5.4：只改草稿，不 setManual、不退出（v0.6.30 多选 toggle）
+          var i = draft.indexOf(c.name);
+          if (i >= 0) draft.splice(i, 1); else draft.push(c.name);
           renderList();
-        }, { title: on ? '取消选中' : '选择角色：' + c.name });
+        }, { title: on ? '取消选中' : (isAuto ? '转为手动角色：' + c.name : '选择角色：' + c.name) });
         if (on) row.classList.add('is-current');
+        if (isAuto) {
+          row.classList.add('is-auto');
+          row.appendChild(V.utils.el('span', {
+            className: 'vshell-tag-row-auto',
+            title: '自动赋予的角色（播放满 5s 后自动转手动）',
+          }, '自动'));
+        }
         list.appendChild(row);
       });
     }
     renderList();
 
     function applyAndClose() {
-      // v0.5.6 第二十七轮（用户纠正）：**没有任何角色处于选中状态**
-      // （draft === null，即用户点击当前高亮行取消选中 / 添加场景未选）
-      // 才设为无角色——**没点任何行**（draft === current，current 行仍
-      // 有 is-current 高亮 = 有选中）→ 保持原角色不动。
-      // 移除后由 characters.assign(null) 写入 removedIds 标记——标题
-      // 命中关键词也不会自然赋予"复活"（第二十七轮：原行为移除后
-      // charFor 立即重评 → 角色又回来 = 用户报的"还原设置前的角色"）
-      if (draft !== current && V.characters) {
-        // v0.5.7 多源：跨源赋予（目标源 = 角色所属源；新角色建于视频归属源）
-        V.characters.assignTo({ id: videoId, sourceId: src, title: title }, draft, meta);
-        V.toast.ok(draft ? ('已设为角色：' + draft) : '已移除角色');
+      if (!V.characters) { close(); return; }
+      var changed = draft.length !== currentManual.length
+        || draft.some(function (n) { return currentManual.indexOf(n) < 0; });
+      if (changed) {
+        V.characters.setManual(videoId, draft, meta, src);
+        V.toast.ok(draft.length ? ('已设置角色：' + draft.join('、')) : '已移除角色');
       }
       close();
     }
 
     var footBtns = [footBtn('回退', 'vshell-btn-secondary', function () {
-      draft = current;           // 放弃草稿：回打开时的角色，不保存、不退出
+      draft = currentManual.slice();   // 放弃草稿：回打开时的手动名单，不保存、不退出
       renderList();
     })];
     // v0.5.6 用户需求：去除「移除角色」按钮（想移除 = 点击当前角色行取消选中）
-    // v0.5.6 第五轮：**重置**（原「还原角色」，第六轮改名）——仅手动指定时
-    // 显示——去除手动指定，自然重评（可能恢复自然角色/冲突/无角色；用户
-    // check 点：原冲突的去除手动指定后自然又冲突）
+    // v0.5.6 第五轮：**重置**——仅手动指定时显示——去除手动指定，自然重评
     if (V.characters && V.characters.isManual && V.characters.isManual(videoId, src)) {
       footBtns.unshift(footBtn('重置', 'vshell-btn-secondary', function () {
         if (V.characters.unassign) {

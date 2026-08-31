@@ -1,36 +1,36 @@
 /* ============================================================
- * characters — 角色系统（v0.5.0，标签功能全面升级）
+ * characters — 角色系统（v0.5.0 标签升级；v0.6.30 多角色重构）
  *
  * 背景：不同 UP 可能创作同一角色；有的视频平台没有「UP」概念
  * → 为通用性统一用「角色」指代增强后的标签功能。
  *
- * 三个 store 键（store 自动加 vshell. 前缀）：
- *  - 'characters'：角色列表 [{name, icon, keywords:[...]}]
- *    keywords = 自定义关键词列表（**含角色名**，匹配只认关键词）
- *  - 'videoChars'：{videoId: roleName}——已被赋予的角色
- *    （自动匹配赋予 / 手动赋予 / 冲突解析选定，统一存这里）
- *  - 'charConflicts'：{videoId: [roleName,...]}——冲突态
- *    （标题一次性匹配多个角色 → 不自动赋予，标记冲突）
- *  - 'charLocks'（v0.5.6）：{videoId: true}——**人工锁定**：手动赋予/
- *    冲突解析选定的视频不再被 charFor 自动重评升级为冲突
- *    （用户报：解决冲突选了角色但立即又变回冲突态，结果不生效）
- *  - 'charVideos'（v0.5.6）：{roleName: [videoMeta,...]}——该角色名下
- *    的视频快照（角色主页「手动添加」列表数据源；assign/resolveConflict
- *    时由调用方传入 meta：{id,bvid,title,cover,url,addedAt}）
+ * store 键（store 自动加 vshell. 前缀，按数据源 scopedKey）：
+ *  - 'characters'：角色列表 [{name, icon, keywords:[...], exclusions:[...]}]
+ *  - 'videoChars'：{videoId: [roleName,...]}——**全部**已赋予角色
+ *    （手动赋予 + 自动赋予统一存这里，数组）
+ *  - 'charManuals'：{videoId: {names:[手动角色...], at}}——**手动名单**。
+ *    角色分两类：手动赋予（用户显式点选 / 播放 5s 升级）与自动赋予
+ *    （标题关键词匹配 / 角色页搜索赋予）。自动 = videoChars - manuals。
+ *  - 'charVideos'：{roleName: [videoMeta,...]}——**仅手动赋予**写快照
+ *    （角色主页「手动添加」段数据源；自动赋予不进快照）
+ *  - 'charConflicts'：**废弃**（v0.6.30 无冲突概念——一个视频可属多个
+ *    角色，命中多个全部自动赋予；历史键保留不读不写新数据）
+ *  - 'charLocks'（历史）：{videoId: true} 人工锁定（保留字段不再读）
+ *  - 'charFollows'：{roleName: true} 关注的角色
+ *  - 'charRemoved'：{id: true} 手动移除标记（不再自然赋予防复活）
  *
- * 自动赋予（卡片**第一次**加载时，charFor 调用）：
- *  - videoChars 已有该视频 → 直接返回已赋予角色（不再匹配）
- *  - charConflicts 已有 → 返回冲突态（不再重新匹配）
- *  - 否则按标题关键词匹配：0 命中 → 无角色（不存，角色/关键词
- *    变化后可重新匹配）；1 命中 → 自动赋予（存 videoChars）；
- *    ≥2 命中 → 冲突（存 charConflicts）
+ * 角色赋予模型（用户拍板 v0.6.30）：
+ *  - 自动赋予：①标题关键词匹配（charFor 首次加载，命中全部角色）
+ *    ②角色页搜索赋予（assignAuto，跨源：a 源视频 → a 源角色；目标源
+ *    无同名角色 → 先建副本复制 icon/banner/keywords/exclusions）
+ *  - 手动赋予：详情页/卡片弹窗（setManual 整体提交手动名单）；
+ *    自动角色不因手动编辑消失（手动增删只动手动名单）
+ *  - **升级规则**：视频实际播放连续满 5s（watched 状态机，不累计）
+ *    → autoToManual：该视频**所有**角色转为手动（manuals 全量 + 锁定）
+ *  - unassign（重置）：清除手动名单 → 按标题自然重评（重新自动赋予）
  *
- * 手动管理（详情页弹窗，用户拍板）：
- *  - assign(id, name|null)：显式赋予 / 移除（同时清冲突态）
- *  - resolveConflict(id, name|null)：冲突解析（选定 / 放弃）
- *
- * 旧数据迁移：v0.5.0 前 store 'tags'（字符串数组或 [{name,icon}]）
- * → 自动迁移为 [{name, icon, keywords:[name]}] 并删除 tags 键。
+ * 旧数据迁移：videoChars 单值字符串 → [字符串]；manuals {name} →
+ * {names:[name]}；'tags' 旧键 → [{name, icon, keywords:[name]}]。
  * ============================================================ */
 (function () {
   'use strict';
@@ -396,7 +396,14 @@
     d.chars.splice(i, 1);
     var dirty = false;
     Object.keys(d.videoChars).forEach(function (id) {
-      if (d.videoChars[id] === name) { delete d.videoChars[id]; dirty = true; }
+      // v0.6.30 多角色数组：从数组移除该角色（空数组删键）
+      var arr = d.videoChars[id];
+      if (typeof arr === 'string') { if (arr === name) { delete d.videoChars[id]; dirty = true; } return; }
+      if (Array.isArray(arr) && arr.indexOf(name) >= 0) {
+        arr = arr.filter(function (x) { return x !== name; });
+        if (arr.length) d.videoChars[id] = arr; else delete d.videoChars[id];
+        dirty = true;
+      }
     });
     Object.keys(d.conflicts).forEach(function (id) {
       var arr = d.conflicts[id];
@@ -446,7 +453,16 @@
     c.keywords = (c.keywords || []).map(function (k) { return k === oldName ? nn : k; });
     var dirty = false;
     Object.keys(d.videoChars).forEach(function (id) {
-      if (d.videoChars[id] === oldName) { d.videoChars[id] = nn; dirty = true; }
+      // v0.6.30 多角色数组：替换数组中旧名 → 新名
+      var arr = d.videoChars[id];
+      if (typeof arr === 'string') {
+        if (arr === oldName) { d.videoChars[id] = nn; dirty = true; }
+        return;
+      }
+      if (Array.isArray(arr) && arr.indexOf(oldName) >= 0) {
+        d.videoChars[id] = arr.map(function (x) { return x === oldName ? nn : x; });
+        dirty = true;
+      }
     });
     Object.keys(d.conflicts).forEach(function (id) {
       var arr = d.conflicts[id];
@@ -629,18 +645,26 @@
     return out;
   }
 
-  /** 已赋予角色名（无 → null；v0.5.7 srcId 缺省主源） */
+  /** 已赋予角色名**数组**（无 → null；v0.6.30 多角色：返回全部角色名；
+   *  旧单值数据自动迁移。v0.5.7 srcId 缺省主源） */
   function getChar(id, srcId) {
     var d = dataOf(srcId && srcId !== 'local' ? srcId : primaryId());
-    return id ? d.videoChars[id] || null : null;
+    var arr = vcArr(d, id);
+    return arr && arr.length ? arr.slice() : null;
   }
 
-  /** 冲突角色名数组（无 → null；v0.5.7 srcId 缺省主源） */
-  function getConflict(id, srcId) {
-    if (!id) return null;
+  /** v0.6.30：该视频**手动**角色名单（无 → []）——弹窗草稿初始值 */
+  function getManual(id, srcId) {
+    if (!id) return [];
     var d = dataOf(srcId && srcId !== 'local' ? srcId : primaryId());
-    var arr = d.conflicts[id];
-    return arr && arr.length ? arr.slice() : null;
+    var mn = mNames(d, id);
+    return mn ? mn.slice() : [];
+  }
+
+  /** 冲突态——v0.6.30 废弃（一个视频可属多个角色，无冲突概念）。
+   *  保留函数签名兼容旧调用方，恒返回 null。 */
+  function getConflict() {
+    return null;
   }
 
   /** 写回某源的角色数据（8 键；srcDataOf 的镜像） */
@@ -659,35 +683,78 @@
     invalidateSrc(srcId);
   }
 
+  /* ---------- v0.6.30 多角色辅助 ---------- */
+
+  /** 读 videoChars[id] 为数组（旧单值字符串自动迁移为 [字符串]） */
+  function vcArr(d, id) {
+    if (!id) return null;
+    var v = d.videoChars[id];
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'string' && v) return [v];
+    return null;
+  }
+
+  /** 读 manuals[id] 手动名单（兼容旧 {name,at} 单值格式 → [name]） */
+  function mNames(d, id) {
+    var m = d.manuals[id];
+    if (!m) return null;
+    if (Array.isArray(m.names) && m.names.length) return m.names;
+    if (typeof m.name === 'string' && m.name) return [m.name];
+    return null;
+  }
+
+  /** 角色名数组 → 角色对象列表（按 chars 列表顺序；找不到的跳过） */
+  function resolveChars(d, names) {
+    var out = [];
+    (names || []).forEach(function (n) {
+      for (var i = 0; i < d.chars.length; i++) {
+        if (d.chars[i].name === n) { out.push(d.chars[i]); break; }
+      }
+    });
+    return out;
+  }
+
+  /** 目标源无同名角色 → 在目标源**建立副本**（全源查同名，复制
+   *  icon/banner/keywords/exclusions——用户拍板 v0.6.30：跨源添加时
+   *  b 源无此角色则先建 b 源副本再赋予；各源实际数据不合并，仅在
+   *  多源整合（listAll）时按名并集） */
+  function ensureRoleOn(d, vidSrc, name) {
+    var exists = d.chars.some(function (c) { return c.name === name; });
+    if (exists) return;
+    var srcChar = null;
+    var ids = srcIds();
+    for (var s = 0; s < ids.length && !srcChar; s++) {
+      var sd = dataOf(ids[s]);
+      sd.chars.forEach(function (c) {
+        if (!srcChar && c.name === name) srcChar = c;
+      });
+    }
+    d.chars.unshift({
+      name: name,
+      icon: srcChar ? srcChar.icon || '' : '',
+      banner: srcChar ? srcChar.banner || '' : '',
+      keywords: srcChar && srcChar.keywords && srcChar.keywords.length
+        ? srcChar.keywords.slice() : [name],
+      exclusions: srcChar && srcChar.exclusions ? srcChar.exclusions.slice() : [],
+    });
+  }
+
   /** 角色解析核心（按源数据上运行；v0.5.7 从 charFor 抽出）：
-   *  自动赋予/冲突判定（持久化经 persistFn）。语义与原 charFor 一致。 */
+   *  v0.6.30 多角色无冲突：已有角色 → 直接返回全部（不再自动增删）；
+   *  无角色 → 标题命中**全部**自动赋予（数组）。返回
+   *  { kind:'char', chars:[角色对象...] } 或 { kind:'none' }。 */
   function charForOn(d, id, title, persistFn) {
     if (!id) return { kind: 'none' };
-    var name = d.videoChars[id];
-    var hits = matchTitleOn(d, title);
-    if (name) {
-      var found = null;
-      d.chars.forEach(function (c) { if (c.name === name) found = c; });
-      if (!found) return { kind: 'none' };
-      if (d.locks[id]) return { kind: 'char', char: found };
-      if (hits.length >= 2 && hits.some(function (h) { return h.name === name; })) {
-        d.conflicts[id] = hits.map(function (h) { return h.name; });
-        persistFn();
-        return { kind: 'conflict', chars: d.conflicts[id].slice() };
-      }
-      return { kind: 'char', char: found };
+    var arr = vcArr(d, id);
+    if (arr && arr.length) {
+      return { kind: 'char', chars: resolveChars(d, arr) };
     }
     if (d.removedIds[id]) return { kind: 'none' };
-    if (d.conflicts[id]) return { kind: 'conflict', chars: d.conflicts[id].slice() };
-    if (hits.length === 1) {
-      d.videoChars[id] = hits[0].name;
+    var hits = matchTitleOn(d, title);
+    if (hits.length) {
+      d.videoChars[id] = hits.map(function (h) { return h.name; });
       persistFn();
-      return { kind: 'char', char: hits[0] };
-    }
-    if (hits.length > 1) {
-      d.conflicts[id] = hits.map(function (h) { return h.name; });
-      persistFn();
-      return { kind: 'conflict', chars: d.conflicts[id].slice() };
+      return { kind: 'char', chars: hits };
     }
     return { kind: 'none' };
   }
@@ -738,149 +805,161 @@
     touchVideoOn(mainData(), name, id, meta, isRemove);
   }
 
-  /** 显式赋予/移除核心（按源数据上运行；assign/resolveConflict/assignTo 共用） */
-  function assignOn(d, id, name, meta) {
-    var prev = d.videoChars[id];
-    if (name) {
-      d.videoChars[id] = name;
-      d.locks[id] = true;                       // 人工锁定
-      d.manuals[id] = { name: name, at: Date.now() };   // 手动指定标记
-      touchVideoOn(d, name, id, meta, false);
-      d.removedIds[id] = false;                 // 重新赋予清除移除标记（值标记防 dictionary 退化）
+  /** v0.6.30 多角色**整体设置手动名单**（详情页/卡片弹窗提交）：
+   *  - list = 新手动角色名数组；原**自动**角色（videoChars 中非原手动的）
+   *    保留——手动编辑只动手动名单，自动角色不因手动编辑消失
+   *  - 最终 videoChars = 新手动 + 原自动（去重）；全部取消且原手动非空
+   *    → 移除标记（防自然复活）
+   *  - charVideos 快照 diff：新增手动角色写快照、移出手动角色删快照
+   *    （自动角色不写快照——角色页「手动添加」段只含手动赋予）
+   *  - 手动名单非空 → manuals[id]={names,at} + locks；空 → 删 manuals/locks
+   *  返回最终手动名单。 */
+  function setManual(id, list, meta, srcId) {
+    if (!id) return [];
+    var sid = srcId && srcId !== 'local' ? srcId : primaryId();
+    var d = dataOf(sid);
+    var names = Array.isArray(list) ? list.filter(function (n) {
+      return n && typeof n === 'string';
+    }) : [];
+    names = names.filter(function (n, i, a) { return a.indexOf(n) === i; });
+    var oldManual = mNames(d, id) ? mNames(d, id).slice() : [];
+    var arr = vcArr(d, id);
+    var autoNames = [];
+    if (arr) {
+      autoNames = arr.filter(function (n) { return oldManual.indexOf(n) < 0; });
+    }
+    var finalNames = names.slice();
+    autoNames.forEach(function (n) {
+      if (finalNames.indexOf(n) < 0) finalNames.push(n);
+    });
+    if (finalNames.length) {
+      d.videoChars[id] = finalNames;
+      if (d.removedIds[id]) d.removedIds[id] = false;
     } else {
       delete d.videoChars[id];
-      delete d.locks[id];
-      delete d.manuals[id];
-      d.removedIds[id] = true;                  // 手动移除：此后不再自然赋予/冲突（防复活）
+      if (oldManual.length) d.removedIds[id] = true;   // 全部取消 = 手动移除
     }
-    if (prev && prev !== name) touchVideoOn(d, prev, id, null, true);   // 换角色/移除 → 旧角色列表移除
-    delete d.conflicts[id];
+    names.forEach(function (n) {
+      if (oldManual.indexOf(n) < 0) touchVideoOn(d, n, id, meta, false);
+    });
+    oldManual.forEach(function (n) {
+      if (names.indexOf(n) < 0) touchVideoOn(d, n, id, null, true);
+    });
+    if (names.length) {
+      d.manuals[id] = { names: names.slice(), at: Date.now() };
+      d.locks[id] = true;
+    } else {
+      delete d.manuals[id];
+      delete d.locks[id];
+    }
+    persistSrcData(sid, d);
+    notify();
+    return names.slice();
   }
 
-  /** 显式赋予/移除：assign(id, name|null, meta?, srcId?)（清冲突态；人工锁定）
-   *  v0.5.3：操作后广播（详情页 UP 行/卡片角标即时刷新，用户需求 1）
-   *  v0.5.6：meta 可选——有则写入角色视频快照（角色主页）；无则只记录 id
-   *  （展示时从 saved 兜底查元数据）。人工赋予 → locks[id]（不再重评冲突）
-   *  v0.5.7：srcId 指定归属源（缺省主源） */
+  /** 显式赋予/移除——v0.6.30 薄壳：name → setManual([name])（清掉旧手动
+   *  名单、保留自动角色）；name 空 → setManual([])（移除全部手动）。
+   *  v0.5.6：meta 可选——有则写入角色视频快照（角色主页）。 */
   function assign(id, name, meta, srcId) {
     if (!id) return;
     var sid = srcId && srcId !== 'local' ? srcId : primaryId();
-    var d = dataOf(sid);
-    assignOn(d, id, name, meta);
-    persistSrcData(sid, d);
-    notify();
+    setManual(id, name ? [name] : [], meta, sid);
   }
 
-  /** v0.5.7 多源跨源赋予：给 item（归属源 a）的视频添加角色 name——
-   *  目标源 = **视频归属源 a**（用户拍板 v0.5.8：角色列表按视频源管理——
-   *  a 源视频上使用角色 → 该角色登记进 a 源列表；**唯一**跨源添加途径）。
-   *  - a 源已有该角色 → 直接赋予（写 a 源键）
-   *  - a 源无（弹窗并集列表里选的是其他源的角色 c / 全新名字）→ 在 a 源
-   *    **建立**角色：icon/banner/keywords 从全源同名角色复制（无同名 →
-   *    keywords=[name]；featured 不复制——代表作按源隔离），再赋予。
-   *  其他源数据**完全不碰**。除本入口外无任何路径会跨源添加角色：
-   *  charFor 自动匹配按源隔离（a 源视频只匹配 a 源角色）；assign/
-   *  resolveConflict 的 srcId 由调用方传视频源；角色级操作（icon/banner/
-   *  keywords/featured/follow）按 srcOfRole 角色所属源路由。返回是否成功。 */
+  /** v0.5.7 多源跨源赋予：给 item（归属源 a）的视频添加/移除角色 name——
+   *  v0.6.30 多角色：**toggle 手动名单**（name 已在手动名单 → 移除，否则加入）。
+   *  目标源 = **视频归属源 a**（a 源无同名角色 → ensureRoleOn 建副本复制
+   *  icon/banner/keywords/exclusions；其他源数据不碰）。返回是否成功。 */
   function assignTo(item, name, meta) {
     var id = item && (item.id || item.bvid);
     if (!id || !name) return false;
     var vidSrc = (item.sourceId && item.sourceId !== 'local') ? item.sourceId : primaryId();
     var d = dataOf(vidSrc);
-    var exists = d.chars.some(function (c) { return c.name === name; });
-    if (!exists) {
-      // 全源查找同名角色（只读复制元数据，不修改源数据）
-      var srcChar = null;
-      var ids = srcIds();
-      for (var s = 0; s < ids.length && !srcChar; s++) {
-        var sd = dataOf(ids[s]);
-        sd.chars.forEach(function (c) {
-          if (!srcChar && c.name === name) srcChar = c;
-        });
-      }
-      d.chars.unshift({
-        name: name,
-        icon: srcChar ? srcChar.icon || '' : '',
-        banner: srcChar ? srcChar.banner || '' : '',
-        keywords: srcChar && srcChar.keywords && srcChar.keywords.length
-          ? srcChar.keywords.slice() : [name],
-        // v0.5.9：跨源建立时排除词一并复制（匹配语义保持一致）
-        exclusions: srcChar && srcChar.exclusions ? srcChar.exclusions.slice() : [],
-      });
-    }
-    assignOn(d, id, name, meta);
-    persistSrcData(vidSrc, d);
-    notify();
+    ensureRoleOn(d, vidSrc, name);
+    var oldManual = mNames(d, id) ? mNames(d, id).slice() : [];
+    var list = oldManual.slice();
+    var i = list.indexOf(name);
+    if (i >= 0) list.splice(i, 1); else list.push(name);
+    setManual(id, list, meta, vidSrc);
     return true;
   }
 
-  /** 冲突解析：选定角色（或 null=放弃，保持无角色）——广播同 assign
-   *  v0.5.6：选定即**人工锁定**（不再被 charFor 重评回冲突）；meta 写入快照
-   *  v0.5.7：srcId 指定归属源（缺省主源） */
-  function resolveConflict(id, name, meta, srcId) {
-    if (!id) return;
-    var sid = srcId && srcId !== 'local' ? srcId : primaryId();
-    var d = dataOf(sid);
-    var prev = d.videoChars[id];
-    delete d.conflicts[id];
-    if (name) {
-      d.videoChars[id] = name;
-      d.locks[id] = true;
-      d.manuals[id] = { name: name, at: Date.now() };
-      touchVideoOn(d, name, id, meta, false);
-      d.removedIds[id] = false;
+  /** v0.6.30 **自动赋予**（角色页搜索筛完的视频 / 批量场景）：
+   *  - 目标源 = 视频归属源；无同名角色 → 建副本（复制头像/背景/关键词/排除词）
+   *  - 写入 videoChars（追加，不动已有角色——多角色共存）
+   *  - **不进 manuals（自动角色）**；**不进 charVideos 快照**（角色页
+   *    「手动添加」段只含手动赋予）
+   *  - 清 removedIds 标记（显式赋予，允许自然匹配）
+   *  - 不 notify（批量搜索场景避免雪崩，调用方自行广播）。返回是否成功。 */
+  function assignAuto(item, name) {
+    var id = item && (item.id || item.bvid);
+    if (!id || !name) return false;
+    var vidSrc = (item.sourceId && item.sourceId !== 'local') ? item.sourceId : primaryId();
+    var d = dataOf(vidSrc);
+    ensureRoleOn(d, vidSrc, name);
+    var arr = vcArr(d, id);
+    if (arr) {
+      if (arr.indexOf(name) >= 0) return true;      // 已拥有
     } else {
-      delete d.videoChars[id];
-      delete d.locks[id];
-      delete d.manuals[id];
-      d.removedIds[id] = true;
+      arr = d.videoChars[id] = [];
     }
-    if (prev && prev !== name) touchVideoOn(d, prev, id, null, true);
-    persistSrcData(sid, d);
-    notify();
+    arr.push(name);
+    if (d.removedIds[id]) d.removedIds[id] = false;
+    persistSrcData(vidSrc, d);
+    return true;
   }
 
-  /** v0.5.6 第五轮：该视频角色是否为**手动指定**（assign/resolveConflict/
-   *  观看 5s 自动转手动；与自然赋予区分——即使结果一致也不同）
-   *  v0.5.7：srcId 缺省主源 */
+  /** 冲突解析——v0.6.30 废弃（无冲突概念，一个视频可属多个角色）。
+   *  旧调用方（char-picker conflict 弹窗）已删除；保留空实现防外部引用崩。 */
+  function resolveConflict() { /* noop */ }
+
+  /** v0.5.6 第五轮：该视频是否有**手动**角色（manuals 名单非空；
+   *  与自动赋予区分——自动角色 = videoChars - manuals）。v0.5.7：srcId 缺省主源 */
   function isManual(id, srcId) {
     if (!id) return false;
     var d = dataOf(srcId && srcId !== 'local' ? srcId : primaryId());
-    return !!d.manuals[id];
+    var mn = mNames(d, id);
+    return !!(mn && mn.length);
   }
 
-  /** v0.5.6 第五轮：还原角色——去除手动指定（删 manual/lock/赋予/冲突），
-   *  然后按标题自然重评（可能恢复自然角色 / 冲突 / 无角色）。
-   *  返回是否曾为手动指定。title 缺省则只清理不重评。
-   *  v0.5.7：srcId 缺省主源 */
+  /** v0.5.6 第五轮：还原角色（重置）——去除手动指定（删 manual/lock/全部
+   *  角色），然后按标题自然重评（可能恢复自动角色 / 无角色）。
+   *  v0.6.30 多角色：全部角色清除后重评（标题命中全部自动赋予）。
+   *  返回是否曾为手动指定。title 缺省则只清理不重评。v0.5.7：srcId 缺省主源 */
   function unassign(id, title, srcId) {
     if (!id) return false;
     var sid = srcId && srcId !== 'local' ? srcId : primaryId();
     var d = dataOf(sid);
-    var had = !!d.manuals[id];
+    var had = isManual(id, sid);
+    var oldManual = had ? mNames(d, id).slice() : [];
     delete d.manuals[id];
     delete d.locks[id];
     delete d.videoChars[id];
     delete d.conflicts[id];
-    d.removedIds[id] = false;                    // v0.5.6 第二十七轮：还原 = 允许自然重评（值标记防 dictionary 退化）
-    if (had && title) charForOn(d, id, title, function () {});   // 先自然重评（写回自然角色/冲突）
+    d.removedIds[id] = false;                    // 还原 = 允许自然重评（值标记防 dictionary 退化）
+    oldManual.forEach(function (n) { touchVideoOn(d, n, id, null, true); });   // 快照移除
+    if (had && title) charForOn(d, id, title, function () {});   // 自然重评（写回自动角色）
     persistSrcData(sid, d);
     notify();                                           // 再广播（UI 读到最终态）
     return had;
   }
 
-  /** v0.5.6 第五轮：观看满 5s 自动将自然角色转为手动指定（用户需求）——
-   *  隐式操作（不广播）；悬停预览不走 watched 路径天然豁免。
+  /** v0.5.6 第五轮：观看满 5s 自动将**所有**角色转为手动（用户需求
+   *  v0.6.30 明确：一个视频一旦实际播放超 5s，其所有自动赋予的角色
+   *  就变成手动赋予的角色）——
+   *  幂等（已有手动名单不再重复）；无角色/无自动角色不动作（调用方
+   *  watched.mark 在播放满 5s 后触发；无自动角色时计时无需启动，这里
+   *  直接短路）。隐式操作（不广播——打开弹窗时实时读到最终态）。
    *  v0.5.7：srcId 缺省主源 */
   function autoToManual(id, srcId) {
     if (!id) return false;
     var sid = srcId && srcId !== 'local' ? srcId : primaryId();
     var d = dataOf(sid);
-    if (d.manuals[id]) return false;
-    var name = d.videoChars[id];
-    if (!name) return false;
-    d.manuals[id] = { name: name, at: Date.now() };
-    d.locks[id] = true;                       // 转手动后不再自动重评
+    if (mNames(d, id) && mNames(d, id).length) return false;      // 已有手动 → 不重复
+    var arr = vcArr(d, id);
+    if (!arr || !arr.length) return false;              // 无角色 → 无需计时
+    d.manuals[id] = { names: arr.slice(), at: Date.now() };
+    d.locks[id] = true;
     persistSrcData(sid, d);
     return true;
   }
@@ -986,15 +1065,18 @@
     setExclusions: setExclusions,       // v0.5.9：排除词（标题命中即不匹配）
     rename: rename,                     // v0.5.9：角色改名（全关联迁移）
     matchTitle: matchTitle,
-    getChar: getChar,
-    getConflict: getConflict,
-    charFor: charFor,
-    assign: assign,
-    assignTo: assignTo,               // v0.5.7 多源：跨源赋予（目标源=角色所属源，缺则建）
-    resolveConflict: resolveConflict,
-    isManual: isManual,               // v0.5.6 第五轮：手动指定标记
+    getChar: getChar,                     // v0.6.30：返回角色名**数组**
+    getManual: getManual,                 // v0.6.30：手动角色名单（弹窗草稿）
+    getConflict: getConflict,             // 废弃（恒 null）
+    charFor: charFor,                     // v0.6.30：{kind:'char', chars:[...]}
+    assign: assign,                       // v0.6.30：setManual 薄壳
+    assignTo: assignTo,               // v0.5.7 多源：跨源 toggle 手动（缺则建副本）
+    assignAuto: assignAuto,           // v0.6.30：自动赋予（搜索/批量，不写快照）
+    setManual: setManual,             // v0.6.30：整体设置手动名单（弹窗提交）
+    resolveConflict: resolveConflict,     // 废弃（空实现兼容）
+    isManual: isManual,               // v0.5.6 第五轮：手动名单非空
     unassign: unassign,               // v0.5.6 第五轮：还原角色（去除手动指定）
-    autoToManual: autoToManual,       // v0.5.6 第五轮：观看 5s 自然转手动
+    autoToManual: autoToManual,       // v0.5.6 第五轮：观看 5s 所有角色转手动
     find: find,                       // v0.5.6：按名查找（角色主页）
     videosOf: videosOf,               // v0.5.6：角色名下视频快照
     toggleFollow: toggleFollow,       // v0.5.6 第十一轮：关注/取消关注
@@ -1002,9 +1084,10 @@
     onChange: onChange,
 
     /** v0.6.4 聚合合并：成员（及被合并组 extraGids）的角色设置迁移到组
-     *  （videoChars/charConflicts 的 'grp' 源键，组 id 'grp:xxx'）；
-     *  多角色 → charConflicts 正常冲突流程（卡片红字 → 弹窗选择）。
-     *  成员原角色保留（解除聚合后可恢复）。仅手动合并路径调用。 */
+     *  （videoChars 的 'grp' 源键，组 id 'grp:xxx'）。
+     *  v0.6.30 多角色：全部角色直接并成数组（无冲突概念——一个视频
+     *  可属多个角色；组卡显示全部）。成员原角色保留（解除聚合后可恢复）。
+     *  仅手动合并路径调用。 */
     absorbToGroup: function (gid, members, extraGids) {
       var sid = 'grp';
       var d = srcDataOf(sid);
@@ -1012,28 +1095,18 @@
       function addName(n) {
         if (n && typeof n === 'string' && names.indexOf(n) === -1) names.push(n);
       }
-      function collectConflict(arr) {
-        if (Array.isArray(arr)) arr.forEach(addName);
-      }
-      if (d.videoChars[gid]) addName(d.videoChars[gid]);
-      collectConflict(d.conflicts[gid]);
+      function collect(arr) { if (Array.isArray(arr)) arr.forEach(addName); }
+      collect(vcArr(d, gid));
+      collect(d.conflicts[gid]);
       (members || []).forEach(function (m) {
-        try { addName(srcDataOf(m.src).videoChars[String(m.id)]); } catch (e) { /* noop */ }
+        try { collect(vcArr(srcDataOf(m.src), String(m.id))); } catch (e) { /* noop */ }
       });
       (extraGids || []).forEach(function (og) {
-        try {
-          if (d.videoChars[og]) addName(d.videoChars[og]);
-          collectConflict(d.conflicts[og]);
-        } catch (e) { /* noop */ }
+        try { collect(vcArr(d, og)); collect(d.conflicts[og]); } catch (e) { /* noop */ }
       });
       if (!names.length) return;   // 无角色，不动
-      if (names.length === 1) {
-        d.videoChars[gid] = names[0];
-        delete d.conflicts[gid];
-      } else {
-        d.conflicts[gid] = names;
-        delete d.videoChars[gid];
-      }
+      d.videoChars[gid] = names;
+      delete d.conflicts[gid];
       (extraGids || []).forEach(function (og) {
         delete d.videoChars[og];
         delete d.conflicts[og];
