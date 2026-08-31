@@ -17,6 +17,11 @@
   var panel = null;         // 当前打开的 backdrop 元素
   var selectedName = null;  // 当前高亮的角色（新添加 / 点击选中）
   var MAX_FILE = 5 * 1024 * 1024;   // 原图读取上限 5MB（压缩后仅几 KB，放宽限制）
+  // v0.6.36：独立词限制「添加行归属关键词」提升为模块级——setKeywordExclusions
+  // 触发 onChange → renderDetail 重建会把 renderDetail 闭包内局部状态重置；
+  // 模块级 + 跟随 selectedName 切换重置（同角色重建保留归属）
+  var kweOwner = null;
+  var kweOwnerRole = null;
 
   /** 缩略图（有 icon 显示图片；无 icon 白底+首字；加载失败同样回退） */
   function makeThumb(c, cls) {
@@ -508,7 +513,6 @@
     function renderKws() {
       kwLine.innerHTML = '';
       (r.keywords || []).forEach(function (k) {
-        var item = V.utils.el('div', { className: 'vshell-char-kwitem' });
         var chip = V.utils.el('span', {
           className: 'vshell-char-kwchip',
           title: '关键词',
@@ -527,28 +531,8 @@
               removeKw(k);
             },
           }, V.utils.el('span', { className: 'codicon codicon-close' })),
-          // v0.6.31：独立词排除编辑入口（该关键词必须独立出现）
-          V.utils.el('button', {
-            className: 'vshell-char-kwex-edit',
-            type: 'button',
-            title: '编辑独立词排除（关键词 ' + k + '）',
-            'aria-label': '编辑独立词排除 ' + k,
-            onclick: function (e) {
-              e.stopPropagation();
-              editKwExcls(k);
-            },
-          }, V.utils.el('span', { className: 'codicon codicon-edit' })),
         ]);
-        item.appendChild(chip);
-        // v0.6.31：独立词排除小字（有才显示）
-        var kwe = (r.kwExclusions && r.kwExclusions[k]) || [];
-        if (kwe.length) {
-          item.appendChild(V.utils.el('div', {
-            className: 'vshell-char-kwexline',
-            title: '独立词排除：这些词内部的 ' + k + ' 不算命中',
-          }, '排除: ' + kwe.join('、')));
-        }
-        kwLine.appendChild(item);
+        kwLine.appendChild(chip);
       });
     }
     function removeKw(k) {
@@ -557,98 +541,6 @@
       renderKws();
     }
     renderKws();
-
-    /** v0.6.31：独立词排除编辑弹窗（关键词 kw）——标题中 kw 出现在这些
-     *  词内部时不匹配（只影响该关键词；其他关键词照常包含匹配）。 */
-    function editKwExcls(kw) {
-      var cur = (r.kwExclusions && r.kwExclusions[kw]) || [];
-      var overlay = V.utils.el('div', {
-        className: 'vshell-modal-backdrop vshell-picker-backdrop',
-      });
-      var box = V.utils.el('div', {
-        className: 'vshell-modal vshell-tag-modal vshell-char-kwex-modal',
-      }, [
-        V.utils.el('div', { className: 'vshell-modal-title-row' }, [
-          V.utils.el('div', { className: 'vshell-modal-title' }, '独立词排除 · ' + kw),
-        ]),
-        V.utils.el('div', { className: 'vshell-modal-sub' },
-          '标题中「' + kw + '」出现在这些词内部时不匹配（如关键词 string、排除词 substring）；' +
-          '标题别处独立出现「' + kw + '」仍算命中。'),
-      ]);
-      var listEl = V.utils.el('div', { className: 'vshell-char-kwex-list' });
-      box.appendChild(listEl);
-      function render() {
-        listEl.innerHTML = '';
-        cur.forEach(function (x) {
-          var chip = V.utils.el('span', { className: 'vshell-char-kwchip' }, [
-            V.utils.el('span', { className: 'vshell-char-kwchip-name' }, x),
-            V.utils.el('button', {
-              className: 'vshell-st-chip-del',
-              type: 'button',
-              title: '删除独立词排除',
-              'aria-label': '删除独立词排除 ' + x,
-              onclick: function (e) {
-                e.stopPropagation();
-                cur = cur.filter(function (v) { return v !== x; });
-                render();
-              },
-            }, V.utils.el('span', { className: 'codicon codicon-close' })),
-          ]);
-          listEl.appendChild(chip);
-        });
-      }
-      render();
-      // 添加行
-      var addRow = V.utils.el('div', { className: 'vshell-char-kwadd' });
-      var inEl = V.utils.el('input', {
-        className: 'vshell-tag-input',
-        type: 'text',
-        placeholder: '添加独立词排除…',
-        'aria-label': '添加独立词排除',
-        onkeydown: function (e) {
-          if (e.key === 'Enter') { e.preventDefault(); doAdd(); }
-        },
-      });
-      function doAdd() {
-        var v = inEl.value.trim();
-        if (!v) return;
-        if (cur.indexOf(v) < 0) cur.push(v);
-        inEl.value = '';
-        render();
-      }
-      addRow.appendChild(inEl);
-      addRow.appendChild(V.utils.el('button', {
-        className: 'vshell-tag-add',
-        type: 'button',
-        title: '添加独立词排除',
-        'aria-label': '添加独立词排除',
-        onclick: doAdd,
-      }, V.utils.el('span', { className: 'codicon codicon-add' })));
-      box.appendChild(addRow);
-      // 底部：取消 / 保存
-      var foot = V.utils.el('div', { className: 'vshell-tag-foot' });
-      foot.appendChild(V.utils.el('button', {
-        className: 'vshell-btn vshell-btn-secondary',
-        onclick: close,
-      }, '取消'));
-      foot.appendChild(V.utils.el('button', {
-        className: 'vshell-btn vshell-btn-primary',
-        onclick: function () {
-          V.characters.setKeywordExclusions(r.name, kw, cur);
-          close();
-          renderKws();
-        },
-      }, '保存'));
-      box.appendChild(foot);
-      function close() {
-        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-      }
-      overlay.appendChild(box);
-      overlay.addEventListener('mousedown', function (e) {
-        if (e.target === overlay) close();
-      });
-      document.body.appendChild(overlay);
-    }
 
     // 添加关键词行
     var kwAdd = V.utils.el('div', { className: 'vshell-char-kwadd' });
@@ -681,6 +573,193 @@
       V.characters.setKeywords(r.name, kws);
       kwInputEl.value = '';
       renderKws();
+    }
+
+    // ===== 独立词限制区（v0.6.33：关键词与全局排除词之间）=====
+    // 限制词按关键词绑定（kwExclusions: {kw: [词]}）；胶囊显示限制词本体，
+    // 其中被限制的关键词片段**高亮**；同一个词被多个关键词限制时合并展示。
+    // 添加行左侧的归属胶囊决定新词挂到哪个关键词下，点击可切换；多次添加
+    // 不自动改变归属；默认归属为空（需先点胶囊选择关键词）。
+    // v0.6.36：容器用**独立类** .vshell-char-kwex-line（不能复用
+    // .vshell-char-exline——renderExcls 的 querySelector('.vshell-char-exline')
+    // 会误命中本区并清空胶囊）
+    mainBox.appendChild(V.utils.el('div', { className: 'vshell-char-sec' }, [
+      V.utils.el('div', { className: 'vshell-char-sec-title' }, '独立词限制'),
+      V.utils.el('div', { className: 'vshell-char-kwex-line' }),
+    ]));
+    var kweLine = mainBox.querySelector('.vshell-char-kwex-line');
+    // v0.6.36：归属关键词模块级 + 跟随角色切换重置（同角色重建保留）
+    if (kweOwnerRole !== r.name) { kweOwner = null; kweOwnerRole = r.name; }
+    /** 最新 kwExclusions（r 是 listAll 拷贝，set 后需从 find 重读） */
+    function liveKwe() {
+      var lv = V.characters.find(r.name);
+      return (lv && lv.kwExclusions) || {};
+    }
+    function renderKwe() {
+      kweLine = mainBox.querySelector('.vshell-char-kwex-line');
+      if (!kweLine) return;
+      kweLine.innerHTML = '';
+      var map = {};   // word → [所属关键词...]
+      var kwe = liveKwe();
+      Object.keys(kwe).forEach(function (kw) {
+        (kwe[kw] || []).forEach(function (w) {
+          if (!map[w]) map[w] = [];
+          if (map[w].indexOf(kw) < 0) map[w].push(kw);
+        });
+      });
+      Object.keys(map).forEach(function (w) {
+          // 高亮区间：所属关键词在限制词内的出现位置
+          var hl = [];
+          map[w].forEach(function (kw) {
+            if (!kw) return;
+            var p = 0;
+            while (true) {
+              var i = w.indexOf(kw, p);
+              if (i < 0) break;
+              hl.push([i, i + kw.length]);
+              p = i + kw.length;
+            }
+          });
+          hl.sort(function (a, b) { return a[0] - b[0]; });
+          var merged = [];
+          hl.forEach(function (h) {
+            if (merged.length && h[0] <= merged[merged.length - 1][1]) {
+              merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], h[1]);
+            } else merged.push(h.slice());
+          });
+          var chip = V.utils.el('span', {
+            className: 'vshell-char-kwchip vshell-char-kwex-chip',
+            title: '独立词限制：' + map[w].join('、'),
+          });
+          var nameEl = V.utils.el('span', { className: 'vshell-char-kwchip-name' });
+          var pos = 0;
+          merged.forEach(function (h) {
+            if (h[0] > pos) nameEl.appendChild(document.createTextNode(w.slice(pos, h[0])));
+            nameEl.appendChild(V.utils.el('span', { className: 'vshell-char-kwex-hl' }, w.slice(h[0], h[1])));
+            pos = h[1];
+          });
+          if (pos < w.length) nameEl.appendChild(document.createTextNode(w.slice(pos)));
+          chip.appendChild(nameEl);
+          chip.appendChild(V.utils.el('button', {
+            className: 'vshell-st-chip-del',
+            type: 'button',
+            title: '删除独立词限制',
+            'aria-label': '删除独立词限制 ' + w,
+            onclick: function (e) {
+              e.stopPropagation();
+              removeKwe(w, map[w]);
+            },
+          }, V.utils.el('span', { className: 'codicon codicon-close' })));
+          kweLine.appendChild(chip);
+        });
+    }
+    function removeKwe(w, kws) {
+      kws.forEach(function (kw) {
+        var list = (liveKwe()[kw] || []).filter(function (x) { return x !== w; });
+        V.characters.setKeywordExclusions(r.name, kw, list);
+      });
+      renderKwe();
+    }
+    renderKwe();
+
+    // 添加行：归属关键词胶囊（点击切换）+ 输入框 + 添加按钮
+    var kweAdd = V.utils.el('div', { className: 'vshell-char-kwadd' });
+    var ownerBtn = V.utils.el('button', {
+      type: 'button',
+      className: 'vshell-char-kwex-owner' + (kweOwner ? '' : ' is-empty'),
+      title: '选择归属关键词',
+      'aria-label': '选择归属关键词',
+      onclick: pickOwner,
+    });
+    function renderOwner() {
+      ownerBtn.innerHTML = '';
+      ownerBtn.appendChild(V.utils.el('span', { className: 'vshell-char-kwex-owner-name' },
+        kweOwner || '选择关键词'));
+      ownerBtn.appendChild(V.utils.el('span', { className: 'codicon codicon-chevron-down' }));
+      ownerBtn.classList.toggle('is-empty', !kweOwner);
+    }
+    renderOwner();
+    kweAdd.appendChild(ownerBtn);
+    var kweInputEl = V.utils.el('input', {
+      className: 'vshell-tag-input',
+      type: 'text',
+      placeholder: '添加独立词限制…',
+      'aria-label': '添加独立词限制',
+      onkeydown: function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); doAddKwe(); }
+      },
+    });
+    var kweAddBtn = V.utils.el('button', {
+      className: 'vshell-tag-add',
+      type: 'button',
+      title: '添加独立词限制',
+      'aria-label': '添加独立词限制',
+      onclick: doAddKwe,
+    }, V.utils.el('span', { className: 'codicon codicon-add' }));
+    kweAdd.appendChild(kweInputEl);
+    kweAdd.appendChild(kweAddBtn);
+    mainBox.appendChild(kweAdd);
+
+    /** 点击归属胶囊 → 弹关键词列表选择 */
+    function pickOwner() {
+      var kws = (r.keywords || []).slice();
+      if (!kws.length) { V.toast.info('请先在「关键词」区添加关键词'); return; }
+      var overlay = V.utils.el('div', {
+        className: 'vshell-modal-backdrop vshell-picker-backdrop',
+      });
+      var box = V.utils.el('div', {
+        className: 'vshell-modal vshell-tag-modal vshell-char-kwex-pick',
+      }, [
+        V.utils.el('div', { className: 'vshell-modal-title-row' }, [
+          V.utils.el('div', { className: 'vshell-modal-title' }, '独立词限制 → 选择归属关键词'),
+        ]),
+        V.utils.el('div', { className: 'vshell-modal-sub' },
+          '新添加的限制词将挂在所选关键词下；该关键词在限制词内部出现时不匹配'),
+      ]);
+      var listEl = V.utils.el('div', { className: 'vshell-char-kwex-line' });
+      kws.forEach(function (kw) {
+        var chip = V.utils.el('button', {
+          type: 'button',
+          className: 'vshell-char-kwchip vshell-char-kwex-owner-opt' + (kweOwner === kw ? ' is-active' : ''),
+        }, [
+          V.utils.el('span', { className: 'vshell-char-kwchip-name' }, kw),
+          kweOwner === kw
+            ? V.utils.el('span', { className: 'codicon codicon-check' })
+            : null,
+        ].filter(Boolean));
+        chip.onclick = function () {
+          kweOwner = kw;
+          renderOwner();
+          close();
+        };
+        listEl.appendChild(chip);
+      });
+      box.appendChild(listEl);
+      var foot = V.utils.el('div', { className: 'vshell-tag-foot' });
+      foot.appendChild(V.utils.el('button', {
+        className: 'vshell-btn vshell-btn-secondary',
+        onclick: close,
+      }, '取消'));
+      box.appendChild(foot);
+      function close() {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      }
+      overlay.appendChild(box);
+      overlay.addEventListener('mousedown', function (e) {
+        if (e.target === overlay) close();
+      });
+      document.body.appendChild(overlay);
+    }
+
+    function doAddKwe() {
+      var v = kweInputEl.value.trim();
+      if (!v) return;
+      if (!kweOwner) { V.toast.info('请先点击输入框左侧胶囊选择归属关键词'); return; }
+      var list = (liveKwe()[kweOwner] || []).slice();
+      if (list.indexOf(v) < 0) list.push(v);
+      V.characters.setKeywordExclusions(r.name, kweOwner, list);
+      kweInputEl.value = '';
+      renderKwe();
     }
 
     // 全局排除词区（v0.5.9 排除词 → v0.6.31 显式改名：标题含任一全局排除

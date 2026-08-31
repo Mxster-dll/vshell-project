@@ -3148,7 +3148,8 @@
 /* v0.5.6 第五轮：原「主页背景图」独立栏样式已删（bannerrow/bannerbtn）——
  *  预览与设置按钮移入 .vshell-char-detail-head */
 .vshell-char-kwline,
-.vshell-char-exline {                 /* v0.5.9：排除词行与关键词行同构 */
+.vshell-char-exline,                   /* v0.5.9：排除词行与关键词行同构 */
+.vshell-char-kwex-line {               /* v0.6.36：独立词限制行独立类（勿复用 exline——全局排除词 querySelector 会误命中） */
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -3189,55 +3190,67 @@
   height: 28px;
   flex: none;
 }
-/* v0.6.31：独立词排除——关键词条目（chip + 独立排除小字）+ 编辑钮 +
- * 编辑弹窗。编辑钮与删除钮同款：默认隐藏、悬停 chip 浮现 */
-.vshell-char-kwitem {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+/* v0.6.33 独立词限制区：限制词胶囊（与关键词胶囊同构，被限制的关键词
+ * 片段高亮）+ 添加行归属胶囊 + 归属选择弹窗 */
+.vshell-char-kwex-hl {
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  background: var(--vscode-textBlockQuote-background);
+  border-radius: 3px;
+  padding: 0 2px;
 }
-.vshell-char-kwex-edit {
-  border: none;
-  background: none;
-  padding: 0;
-  margin: 0;
-  width: 16px;
-  height: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--vscode-descriptionForeground);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 80ms;
-}
-.vshell-char-kwex-edit .codicon {
-  font-size: 11px;
-}
-.vshell .vshell-char-kwchip:hover .vshell-char-kwex-edit,
-.vshell .vshell-char-kwchip .vshell-char-kwex-edit:focus-visible {
+.vshell .vshell-char-kwex-chip:hover .vshell-st-chip-del,
+.vshell .vshell-char-kwex-chip .vshell-st-chip-del:focus-visible {
   opacity: 1;
 }
-.vshell-char-kwex-edit:hover {
+.vshell-char-kwex-owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  flex: none;
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: var(--vscode-cornerRadius-large);
+  background: var(--vscode-toolbar-hoverBackground);
   color: var(--vscode-foreground);
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 140px;
 }
-.vshell-char-kwexline {
+.vshell-char-kwex-owner .vshell-char-kwex-owner-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vshell-char-kwex-owner .codicon {
   font-size: 11px;
   color: var(--vscode-descriptionForeground);
-  padding-left: 10px;
-  line-height: 1.4;
 }
-.vshell-char-kwex-modal {
-  width: 380px;
+.vshell-char-kwex-owner.is-empty .vshell-char-kwex-owner-name {
+  color: var(--vscode-descriptionForeground);
+}
+.vshell-char-kwex-owner:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+  border-color: var(--vscode-focusBorder);
+}
+.vshell-char-kwex-pick {
+  width: 320px;
   max-width: 86vw;
   padding: 16px;
 }
-.vshell-char-kwex-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 12px 0 4px;
-  min-height: 24px;
+.vshell-char-kwex-owner-opt {
+  border: none;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.vshell-char-kwex-owner-opt:hover,
+.vshell-char-kwex-owner-opt.is-active {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground);
+}
+.vshell-char-kwex-owner-opt.is-active .codicon {
+  color: var(--vscode-testing-iconPassed, #89d185);
 }
 .vshell-char-actions {
   display: flex;
