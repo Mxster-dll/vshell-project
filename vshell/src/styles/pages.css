@@ -504,6 +504,7 @@
  *  - 去 Tab：手动添加 + 聚合搜索合并一个网格
  * 全部用 VS Code 主题 token（mimic: floating-panels 卡片几何规则） */
 .vshell-role-page {
+  position: relative;   /* v0.6.53：承载绝对定位返回按钮（角色背景左侧） */
   display: flex;
   flex-direction: column;
   /* 用户需求：banner/代表作/视频墙区块间距 = 设置「卡片间距」（与主页墙一致，等距） */
@@ -512,12 +513,31 @@
      上下保持 20/48 */
   padding: 20px 10% 48px;
 }
-/* 页面头行：返回按钮 + 标题（返回按钮不再叠 banner，用户需求 2a） */
-.vshell-role-headbar {
-  padding-top: 4px;
+/* v0.6.53：返回按钮浮动定位（仿详情页 .vshell-detail-back）——绝对定位
+   在角色背景左侧，完全脱离文档流不影响背景卡片位置；「角色主页」标题已删 */
+.vshell .vshell-role-back {
+  position: absolute;
+  z-index: 6;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+  left: 20px;
+  top: 16px;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+.vshell .vshell-role-back:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
 }
 .vshell-role-banner {
   position: relative;
+  /* v0.6.53：背景卡片变高（原内容高 ≈104px）+ 内容垂直居中 */
+  min-height: 172px;
+  display: flex;
+  align-items: center;
   padding: 20px;
   border-radius: var(--vscode-cornerRadius-large);
   border: 1px solid var(--vscode-panel-border);

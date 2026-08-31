@@ -369,22 +369,20 @@
       return { destroy: function () { state.done = true; page.remove(); } };
     }
 
-    /* ---- 页面头行（v0.5.6 第四轮：返回按钮移出 banner，用户需求 2a） ---- */
-    page.appendChild(V.utils.el('div', { className: 'vshell-page-head vshell-role-headbar' }, [
-      V.utils.el('button', {
-        className: 'vshell-icon-btn vshell-role-back',
-        type: 'button',
-        title: '返回',
-        'aria-label': '返回',
-        onclick: function () {
-          // v0.5.6 第十轮需求 2：只有「返回按钮」返回才保留来源页位置
-          window.__VS_KEEP_SCROLL__ = true;
-          if (history.length > 1) history.back();
-          else V.router.nav('/');
-        },
-      }, V.utils.el('span', { className: 'codicon codicon-arrow-left' })),
-      V.utils.el('h1', { className: 'vshell-page-title' }, '角色主页'),
-    ]));
+    /* ---- 返回按钮（v0.6.53：浮动定位挂 page——参考详情页放置方式，
+     *  绝对定位在角色背景左侧，不影响背景卡片位置；标题「角色主页」已删） ---- */
+    page.appendChild(V.utils.el('button', {
+      className: 'vshell-icon-btn vshell-role-back',
+      type: 'button',
+      title: '返回',
+      'aria-label': '返回',
+      onclick: function () {
+        // v0.5.6 第十轮需求 2：只有「返回按钮」返回才保留来源页位置
+        window.__VS_KEEP_SCROLL__ = true;
+        if (history.length > 1) history.back();
+        else V.router.nav('/');
+      },
+    }, V.utils.el('span', { className: 'codicon codicon-arrow-left' })));
 
     /* ---- banner 头部（背景图可设，用户需求 2b；v0.5.6 第五轮：无自定义
      *  图时用手绘默认 SVG——每个角色都有背景图） ---- */

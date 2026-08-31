@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.52
+// @version      0.6.53
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.52';
+window.VShell.version = '0.6.53';
 
 /* vshell 入口见 src/app.js */
 
@@ -17535,22 +17535,20 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       return { destroy: function () { state.done = true; page.remove(); } };
     }
 
-    /* ---- 页面头行（v0.5.6 第四轮：返回按钮移出 banner，用户需求 2a） ---- */
-    page.appendChild(V.utils.el('div', { className: 'vshell-page-head vshell-role-headbar' }, [
-      V.utils.el('button', {
-        className: 'vshell-icon-btn vshell-role-back',
-        type: 'button',
-        title: '返回',
-        'aria-label': '返回',
-        onclick: function () {
-          // v0.5.6 第十轮需求 2：只有「返回按钮」返回才保留来源页位置
-          window.__VS_KEEP_SCROLL__ = true;
-          if (history.length > 1) history.back();
-          else V.router.nav('/');
-        },
-      }, V.utils.el('span', { className: 'codicon codicon-arrow-left' })),
-      V.utils.el('h1', { className: 'vshell-page-title' }, '角色主页'),
-    ]));
+    /* ---- 返回按钮（v0.6.53：浮动定位挂 page——参考详情页放置方式，
+     *  绝对定位在角色背景左侧，不影响背景卡片位置；标题「角色主页」已删） ---- */
+    page.appendChild(V.utils.el('button', {
+      className: 'vshell-icon-btn vshell-role-back',
+      type: 'button',
+      title: '返回',
+      'aria-label': '返回',
+      onclick: function () {
+        // v0.5.6 第十轮需求 2：只有「返回按钮」返回才保留来源页位置
+        window.__VS_KEEP_SCROLL__ = true;
+        if (history.length > 1) history.back();
+        else V.router.nav('/');
+      },
+    }, V.utils.el('span', { className: 'codicon codicon-arrow-left' })));
 
     /* ---- banner 头部（背景图可设，用户需求 2b；v0.5.6 第五轮：无自定义
      *  图时用手绘默认 SVG——每个角色都有背景图） ---- */
@@ -25719,6 +25717,7 @@ body.vshell-dragging a { pointer-events: none; }
  *  - 去 Tab：手动添加 + 聚合搜索合并一个网格
  * 全部用 VS Code 主题 token（mimic: floating-panels 卡片几何规则） */
 .vshell-role-page {
+  position: relative;   /* v0.6.53：承载绝对定位返回按钮（角色背景左侧） */
   display: flex;
   flex-direction: column;
   /* 用户需求：banner/代表作/视频墙区块间距 = 设置「卡片间距」（与主页墙一致，等距） */
@@ -25727,12 +25726,31 @@ body.vshell-dragging a { pointer-events: none; }
      上下保持 20/48 */
   padding: 20px 10% 48px;
 }
-/* 页面头行：返回按钮 + 标题（返回按钮不再叠 banner，用户需求 2a） */
-.vshell-role-headbar {
-  padding-top: 4px;
+/* v0.6.53：返回按钮浮动定位（仿详情页 .vshell-detail-back）——绝对定位
+   在角色背景左侧，完全脱离文档流不影响背景卡片位置；「角色主页」标题已删 */
+.vshell .vshell-role-back {
+  position: absolute;
+  z-index: 6;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+  left: 20px;
+  top: 16px;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  border-radius: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+.vshell .vshell-role-back:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
 }
 .vshell-role-banner {
   position: relative;
+  /* v0.6.53：背景卡片变高（原内容高 ≈104px）+ 内容垂直居中 */
+  min-height: 172px;
+  display: flex;
+  align-items: center;
   padding: 20px;
   border-radius: var(--vscode-cornerRadius-large);
   border: 1px solid var(--vscode-panel-border);
