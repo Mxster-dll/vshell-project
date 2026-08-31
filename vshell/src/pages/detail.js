@@ -43,6 +43,10 @@
     // destroy 引用 ReferenceError，提升后成员切换/卸载统一清理）
     var offChars = null, offGapChange = null;
     var shotsDetach = null, shotsStopScan = null, scanWin = null;
+    // v0.6.12：静态框架组件（返回按钮/操作行）——不随数据加载，始终可见可用
+    var curDetail = null;      // 当前已加载详情（供操作行点击/状态刷新）
+    var pendingAction = null;  // 详情未就绪时的待执行操作（watch/fav）
+    var actionsRow = null, watchBtn = null, favBtn = null;
 
     var page = V.utils.el('div', { className: 'vshell-page vshell-page-detail' });
     outlet.appendChild(page);
@@ -51,6 +55,71 @@
     var contentBox = V.utils.el('div', { className: 'vshell-detail-content' });
     page.appendChild(contentBox);
     var layout = null, main = null, side = null;
+
+    // v0.6.12：返回按钮 + 操作行（待看/收藏/下载/重新识别）**静态框架**——
+    // 不随详情加载出现，加载中也可见可用；操作按钮在详情未就绪时点击
+    // 记录意图（pendingAction），详情到达后自动执行
+    var backBtn = V.utils.el('button', {
+      className: 'vshell-icon-btn vshell-detail-back',
+      type: 'button', title: '返回', 'aria-label': '返回',
+      onclick: function () {
+        window.__VS_KEEP_SCROLL__ = true;
+        if (history.length > 1) history.back();
+        else V.router.nav('/');
+      },
+    }, V.utils.el('span', { className: 'codicon codicon-arrow-left' }));
+    page.appendChild(backBtn);
+    buildActions();
+
+    /** v0.6.12 静态操作行（挂 contentBox 底部，loadMember 的 layout 插到其前） */
+    function buildActions() {
+      actionsRow = V.utils.el('div', { className: 'vshell-detail-actions' });
+      watchBtn = actionBtn('codicon-add', '待看', 'watch');
+      favBtn = actionBtn('codicon-heart', '收藏', 'fav');
+      watchBtn.addEventListener('click', function () { doSaveAction('watch'); });
+      favBtn.addEventListener('click', function () { doSaveAction('fav'); });
+      actionsRow.appendChild(watchBtn);
+      actionsRow.appendChild(favBtn);
+      actionsRow.appendChild(V.utils.el('button', {
+        className: 'vshell-btn vshell-btn-primary vshell-detail-download',
+        type: 'button',
+        onclick: startDownload,
+      }, [
+        V.utils.el('span', { className: 'codicon codicon-cloud-download' }),
+        V.utils.el('span', { className: 'vshell-btn-text' }, '下载'),
+      ]));
+      // 重新识别分镜：清除本视频缓存/标记 + 立即重扫（绕过旧版误标、
+      // 快扫失败残留；用户可主动触发）
+      actionsRow.appendChild(V.utils.el('button', {
+        className: 'vshell-btn vshell-btn-secondary vshell-detail-rescan',
+        type: 'button',
+        title: '清除分镜缓存并重新识别（扫描期间播放器右上角显示进度）',
+        onclick: rescanShots,
+      }, [
+        V.utils.el('span', { className: 'codicon codicon-sync' }),
+        V.utils.el('span', { className: 'vshell-btn-text' }, '重新识别'),
+      ]));
+      contentBox.appendChild(actionsRow);
+    }
+
+    /** v0.6.12 待看/收藏点击（详情未就绪 → 记录意图，到达后自动执行） */
+    function doSaveAction(kind) {
+      if (!curDetail || typeof curDetail !== 'object') {
+        pendingAction = kind;
+        V.toast.info('正在加载详情，操作稍后自动生效');
+        return;
+      }
+      if (kind === 'watch') V.saved.toggleWatch(curDetail);
+      else if (kind === 'fav') V.saved.toggleFav(curDetail);
+      refreshSaveBtns();
+    }
+
+    /** v0.6.12 mount 级状态刷新（引用 curDetail；render 后与 pendingAction 执行时调用） */
+    function refreshSaveBtns() {
+      if (!watchBtn || !curDetail || typeof curDetail !== 'object') return;
+      watchBtn.classList.toggle('is-active', V.saved.isWatch(curDetail.id, curDetail.sourceId));
+      favBtn.classList.toggle('is-active', V.saved.isFav(curDetail.id, curDetail.sourceId));
+    }
 
     var currentTitle = '';
     var currentPic = '';
@@ -95,7 +164,8 @@
         side = V.utils.el('div', { className: 'vshell-detail-side' });
         layout.appendChild(main);
         layout.appendChild(side);
-        contentBox.appendChild(layout);
+        // v0.6.12：操作行（静态）在底部——layout 插到其前
+        contentBox.insertBefore(layout, actionsRow);
       }
       main.innerHTML = '';
       side.innerHTML = '';
@@ -334,25 +404,20 @@
       }
       currentTitle = detail.title || '';
       currentPic = detail.pic || '';
+      // v0.6.12：静态操作行的当前详情 + 状态刷新 + 意图补执行
+      curDetail = detail;
       updateChip(src, id, detail.title);   // v0.6.1 组详情：回填成员 chip 标题
+      refreshSaveBtns();
+      if (pendingAction) {
+        var pa = pendingAction;
+        pendingAction = null;
+        doSaveAction(pa);
+      }
 
       // 两栏容器已在 loadMember 建好（v0.6.11），main 直接填充
       // 1. 标题（顶部）+ 复制按钮（点击后按钮自身有小动画：图标变对勾 + 脉冲）
-      // v0.5.6 第十轮（用户需求 1）：返回按钮——置 __VS_KEEP_SCROLL__
-      // 标志后返回，来源页恢复进入前的位置（需求 2：只有返回按钮保留）
-      // v0.5.6 第十一轮（用户需求 4）：返回按钮改**浮动布局**——脱离标题行；
-      // v0.5.6 第十三轮（需求 6）：**完全不影响 titleRow 布局**——挂 page
-      // 上由 JS 定位到标题行左侧（titleRow 无 padding/relative；main
-      // overflow:hidden 会裁剪 left:-40px，纯 CSS 溢出方案不可行）
-      var backBtn = V.utils.el('button', {
-        className: 'vshell-icon-btn vshell-detail-back',
-        type: 'button', title: '返回', 'aria-label': '返回',
-        onclick: function () {
-          window.__VS_KEEP_SCROLL__ = true;
-          if (history.length > 1) history.back();
-          else V.router.nav('/');
-        },
-      }, V.utils.el('span', { className: 'codicon codicon-arrow-left' }));
+      // v0.6.12：返回按钮已静态创建（mount 时挂 page，CSS 固定定位）——加载中
+      // 也可见可用，不再由 JS 定位
       var copyBtn = V.utils.el('button', {
         className: 'vshell-icon-btn vshell-detail-copy',
         type: 'button', title: '复制视频标题', 'aria-label': '复制视频标题',
@@ -363,14 +428,6 @@
         copyBtn,
       ]);
       main.appendChild(titleRow);
-      page.appendChild(backBtn);
-      (function positionBack() {
-        try {
-          // titleRow 的 offsetParent 是 .vshell-page-detail（position:relative）
-          backBtn.style.left = (titleRow.offsetLeft - 40) + 'px';
-          backBtn.style.top = (titleRow.offsetTop + Math.round(titleRow.offsetHeight / 2) - 12) + 'px';
-        } catch (e) { /* noop */ }
-      })();
 
       // 2. 信息条：播放 · 弹幕 · 日期 · 时长（· 分区标签）
       var stats = V.utils.el('div', { className: 'vshell-detail-stats' }, [
@@ -523,45 +580,8 @@
       playerCard.appendChild(player.root);
       main.appendChild(playerCard);
 
-      // 5. 操作行
-      var actions = V.utils.el('div', { className: 'vshell-detail-actions' });
-      var watchBtn = actionBtn('codicon-add', '待看', 'watch');
-      var favBtn = actionBtn('codicon-heart', '收藏', 'fav');
-      watchBtn.addEventListener('click', function () {
-        V.saved.toggleWatch(detail);
-        refreshSaveBtns();
-      });
-      favBtn.addEventListener('click', function () {
-        V.saved.toggleFav(detail);
-        refreshSaveBtns();
-      });
-      actions.appendChild(watchBtn);
-      actions.appendChild(favBtn);
-      actions.appendChild(V.utils.el('button', {
-        className: 'vshell-btn vshell-btn-primary vshell-detail-download',
-        type: 'button',
-        onclick: startDownload,
-      }, [
-        V.utils.el('span', { className: 'codicon codicon-cloud-download' }),
-        V.utils.el('span', { className: 'vshell-btn-text' }, '下载'),
-      ]));
-      // 重新识别分镜：清除本视频缓存/标记 + 立即重扫（绕过旧版误标、
-      // 快扫失败残留；用户可主动触发）
-      actions.appendChild(V.utils.el('button', {
-        className: 'vshell-btn vshell-btn-secondary vshell-detail-rescan',
-        type: 'button',
-        title: '清除分镜缓存并重新识别（扫描期间播放器右上角显示进度）',
-        onclick: rescanShots,
-      }, [
-        V.utils.el('span', { className: 'codicon codicon-sync' }),
-        V.utils.el('span', { className: 'vshell-btn-text' }, '重新识别'),
-      ]));
-      main.appendChild(actions);
-
-      function refreshSaveBtns() {
-        watchBtn.classList.toggle('is-active', V.saved.isWatch(detail.id, detail.sourceId));
-        favBtn.classList.toggle('is-active', V.saved.isFav(detail.id, detail.sourceId));
-      }
+      // 5. 操作行（v0.6.12：已静态创建——mount 时挂 contentBox 底部，
+      // 加载中也可见可用；此处仅刷新状态）
       refreshSaveBtns();
 
       // 6. 简介（超长折叠）

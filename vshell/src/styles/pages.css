@@ -225,6 +225,15 @@
   flex: 1;
   min-height: 0;
 }
+/* v0.6.11 内容区容器（page 的直接子元素）：继承 flex 布局，layout 的
+   flex:1 才能生效（此前无样式 → layout 高度塌缩为内容高度，侧栏滚动失效）；
+   v0.6.12 操作行（静态）作为本容器最后一个子元素，位于 layout 下方 */
+.vshell-detail-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .vshell-detail-main {
   min-width: 0;
   min-height: 0;
@@ -289,6 +298,9 @@
   width: 24px;
   height: 24px;
   font-size: 13px;
+  /* v0.6.12：静态框架固定定位（原 JS 定位 ≈ titleRow.offsetLeft-40 / 行居中） */
+  left: 20px;
+  top: 16px;
   background: var(--vscode-button-secondaryBackground);
   color: var(--vscode-button-secondaryForeground);
   border-radius: 6px;
