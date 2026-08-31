@@ -546,6 +546,7 @@
 }
 .vshell-role-avatar-box {
   display: flex;
+  box-sizing: border-box;   /* v0.6.44 修：64px 含 1px 边框——与 hover 遮罩/wrap 严格对齐，遮罩不漏白边 */
   width: 64px;
   height: 64px;
   border-radius: var(--vscode-cornerRadius-large);
@@ -590,6 +591,7 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
+  width: fit-content;   /* v0.6.44 修：行宽收缩到内容——名字 flex:1 不再撑满，按钮紧贴名字文字 */
 }
 .vshell-role-dname-row .vshell-role-name {
   flex: 1;
