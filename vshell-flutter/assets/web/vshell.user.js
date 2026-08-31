@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.27
+// @version      0.6.28
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.27';
+window.VShell.version = '0.6.28';
 
 /* vshell 入口见 src/app.js */
 
@@ -14514,6 +14514,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var curDetail = null;      // 当前已加载详情（供操作行点击/状态刷新）
     var pendingAction = null;  // 详情未就绪时的待执行操作（watch/fav）
     var actionsRow = null, watchBtn = null, favBtn = null;
+    // v0.6.27：当前成员的表快照（loadMember 存）——详情缺失字段（如 17c 详情
+    // 接口无日期）回退预览值，信息行/角色卡快照不丢日期
+    var curSnap = null;
 
     var page = V.utils.el('div', { className: 'vshell-page vshell-page-detail' });
     outlet.appendChild(page);
@@ -14849,7 +14852,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       // v0.6.14：同构骨架——与真实详情布局一致（标题行/信息条/UP 行/视频卡/
       // 简介/相关推荐项），各元素为加载动效占位；操作行/返回按钮为真实静态组件
       // v0.6.15：有卡片快照时，标题/封面先用卡片值（真实文本/封面图）占位
-      var snap = tableSnap(mSrc, mId);
+      // v0.6.27：快照存 mount 级 curSnap——详情缺失字段回退预览值
+      var snap = curSnap = tableSnap(mSrc, mId);
       main.insertBefore(skeletonMain(snap, mSrc, mId), actionsRow);
       main.appendChild(skeletonDesc());      // 简介骨架：操作行之后（真实顺序一致）
       side.appendChild(skeletonSide());
@@ -15122,8 +15126,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           ? V.utils.el('span', { className: 'vshell-detail-stats-item' },
               V.utils.fmtCount(detail.stat.danmaku) + ' 弹幕')
           : null,
-        detail.pubdate
-          ? V.utils.el('span', { className: 'vshell-detail-stats-item' }, fmtDate(detail.pubdate))
+        // v0.6.27：详情接口无日期（17c）→ 回退表快照日期（预览值），不丢日期
+        (detail.pubdate || (curSnap && curSnap.pubdate))
+          ? V.utils.el('span', { className: 'vshell-detail-stats-item' },
+              fmtDate(detail.pubdate || (curSnap && curSnap.pubdate)))
           : null,
         detail.tname
           ? V.utils.el('span', { className: 'vshell-detail-meta-tag' }, detail.tname)
@@ -15147,7 +15153,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           title: detail.title || '',
           cover: detail.pic || '',
           url: '#/video/' + id,
-          pubdate: detail.pubdate || '',   // v0.5.6 第八轮：快照带日期（角色主页卡片右下角）
+          pubdate: detail.pubdate || (curSnap && curSnap.pubdate) || '',   // v0.5.6 第八轮：快照带日期（角色主页卡片右下角）；v0.6.27：详情缺失回退预览
         };
       }
       function renderUpRow() {
