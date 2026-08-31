@@ -411,46 +411,12 @@
   }
   /** v0.6.1 启动清理：auto 组移除未激活源成员（隐私源语义：不加载不显示），
    *  空组删除、主成员落回激活源、pending 未激活源索引清除 */
+  /** v0.6.52（用户拍板：保留数据，仅隐藏）：不再删除任何组/成员数据——
+   *  冷启动隐私清洗把 kkav/17c 剔除时，其 auto 组数据必须保留（重新启用
+   *  即恢复）。未激活源成员由渲染层（detail.js renderGroupBar 等）过滤显示。
+   *  本函数保留签名（app.js 调用点不动）但恒为 no-op。 */
   function cleanInactive() {
-    load();
-    var active = activeSrcSet();
-    // v0.6.51：active 只有 local（冷启动隐私清洗把全部源剔除）时跳过——
-    // 否则会把所有 auto 组成员过滤掉、空组全删（曾误删 59 个自动组；
-    // 冷启动 privacy 语义是「不挂载」，不是「删除用户聚合数据」）
-    var hasReal = false;
-    for (var k in active) { if (k !== 'local') { hasReal = true; break; } }
-    if (!hasReal) return false;
-    var changed = false;
-    Object.keys(map.groups).forEach(function (g) {
-      var gd = map.groups[g];
-      if (!gd.auto) return;
-      // v0.6.3：低信息 repPhash（封面解析成图床默认白图/纯色 → 大量视频
-      // 同一 phash 误聚合，曾 539 个 kkav 视频并为一组）→ 整组作废删除，
-      // 成员释放回单卡（phash 无效无法判断相似性，宁可拆开不误并）
-      if (!phashInfoValid(gd.repPhash)) {
-        delete map.groups[g];
-        changed = true;
-        return;
-      }
-      var before = gd.members.length;
-      gd.members = gd.members.filter(function (m) { return active[m.src]; });
-      if (!gd.members.length) { delete map.groups[g]; changed = true; return; }
-      if (gd.members.length !== before) changed = true;
-      if (!active[gd.coverSrc]) {
-        gd.coverSrc = gd.members[0].src;
-        gd.cover = '';   // 主成员换源，封面暂缺（组卡用占位+标题）
-        // 标题也换：新主成员标题从缓存取（避免残留未激活源的标题）
-        var nt = titleFromCache(gd.members[0].src, gd.members[0].id);
-        if (nt) gd.title = nt;
-      }
-    });
-    Object.keys(map.pending).forEach(function (k) {
-      var ci = k.indexOf(':');
-      var sid = ci < 0 ? k : k.slice(0, ci);
-      if (!active[sid]) { delete map.pending[k]; changed = true; }
-    });
-    if (changed) persist();
-    return changed;
+    return false;
   }
   function scheduleScan(item, baseUrl) {
     if (!item || !item.id || !item.sourceId) return;

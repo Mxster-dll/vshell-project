@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.51
+// @version      0.6.52
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.51';
+window.VShell.version = '0.6.52';
 
 /* vshell 入口见 src/app.js */
 
@@ -5249,46 +5249,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   }
   /** v0.6.1 启动清理：auto 组移除未激活源成员（隐私源语义：不加载不显示），
    *  空组删除、主成员落回激活源、pending 未激活源索引清除 */
+  /** v0.6.52（用户拍板：保留数据，仅隐藏）：不再删除任何组/成员数据——
+   *  冷启动隐私清洗把 kkav/17c 剔除时，其 auto 组数据必须保留（重新启用
+   *  即恢复）。未激活源成员由渲染层（detail.js renderGroupBar 等）过滤显示。
+   *  本函数保留签名（app.js 调用点不动）但恒为 no-op。 */
   function cleanInactive() {
-    load();
-    var active = activeSrcSet();
-    // v0.6.51：active 只有 local（冷启动隐私清洗把全部源剔除）时跳过——
-    // 否则会把所有 auto 组成员过滤掉、空组全删（曾误删 59 个自动组；
-    // 冷启动 privacy 语义是「不挂载」，不是「删除用户聚合数据」）
-    var hasReal = false;
-    for (var k in active) { if (k !== 'local') { hasReal = true; break; } }
-    if (!hasReal) return false;
-    var changed = false;
-    Object.keys(map.groups).forEach(function (g) {
-      var gd = map.groups[g];
-      if (!gd.auto) return;
-      // v0.6.3：低信息 repPhash（封面解析成图床默认白图/纯色 → 大量视频
-      // 同一 phash 误聚合，曾 539 个 kkav 视频并为一组）→ 整组作废删除，
-      // 成员释放回单卡（phash 无效无法判断相似性，宁可拆开不误并）
-      if (!phashInfoValid(gd.repPhash)) {
-        delete map.groups[g];
-        changed = true;
-        return;
-      }
-      var before = gd.members.length;
-      gd.members = gd.members.filter(function (m) { return active[m.src]; });
-      if (!gd.members.length) { delete map.groups[g]; changed = true; return; }
-      if (gd.members.length !== before) changed = true;
-      if (!active[gd.coverSrc]) {
-        gd.coverSrc = gd.members[0].src;
-        gd.cover = '';   // 主成员换源，封面暂缺（组卡用占位+标题）
-        // 标题也换：新主成员标题从缓存取（避免残留未激活源的标题）
-        var nt = titleFromCache(gd.members[0].src, gd.members[0].id);
-        if (nt) gd.title = nt;
-      }
-    });
-    Object.keys(map.pending).forEach(function (k) {
-      var ci = k.indexOf(':');
-      var sid = ci < 0 ? k : k.slice(0, ci);
-      if (!active[sid]) { delete map.pending[k]; changed = true; }
-    });
-    if (changed) persist();
-    return changed;
+    return false;
   }
   function scheduleScan(item, baseUrl) {
     if (!item || !item.id || !item.sourceId) return;
@@ -15390,8 +15356,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     function renderGroupBar(grpObj) {
       var bar = V.utils.el('div', { className: 'vshell-group-bar' });
       var ordered = V.aggregations.orderMembers(grpObj.id);
+      // v0.6.52：未激活源成员「仅隐藏」（数据保留，重新启用即恢复）——
+      // 成员条不渲染未激活源 chip
+      var activeList = (V.multisource && V.multisource.activeSources) ? V.multisource.activeSources() : [];
       var chips = [];
       ordered.forEach(function (m) {
+        if (m.src !== 'local' && activeList.indexOf(m.src) < 0) return;
         var nm = m.src;
         try {
           var ad2 = V.siteAdapters.adapterFor(m.src);
@@ -15435,7 +15405,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       // 使其落到详情内容之后（页面底部 ~2000px），用户看不到换源按钮
       page.insertBefore(bar, contentBox);
       // v0.6.2 解除聚合：拆出当前播放成员（组>1 时显示；src/id 为闭包当前成员）
-      if (grpObj.members.length > 1) {
+      // v0.6.52：按**可见成员**（激活源）计数——未激活源成员已隐藏
+      if (chips.length > 1) {
         var tools = V.utils.el('div', { className: 'vshell-group-tools' }, [
           V.utils.el('button', {
             className: 'vshell-btn vshell-btn-secondary',

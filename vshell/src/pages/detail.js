@@ -473,8 +473,12 @@
     function renderGroupBar(grpObj) {
       var bar = V.utils.el('div', { className: 'vshell-group-bar' });
       var ordered = V.aggregations.orderMembers(grpObj.id);
+      // v0.6.52：未激活源成员「仅隐藏」（数据保留，重新启用即恢复）——
+      // 成员条不渲染未激活源 chip
+      var activeList = (V.multisource && V.multisource.activeSources) ? V.multisource.activeSources() : [];
       var chips = [];
       ordered.forEach(function (m) {
+        if (m.src !== 'local' && activeList.indexOf(m.src) < 0) return;
         var nm = m.src;
         try {
           var ad2 = V.siteAdapters.adapterFor(m.src);
@@ -518,7 +522,8 @@
       // 使其落到详情内容之后（页面底部 ~2000px），用户看不到换源按钮
       page.insertBefore(bar, contentBox);
       // v0.6.2 解除聚合：拆出当前播放成员（组>1 时显示；src/id 为闭包当前成员）
-      if (grpObj.members.length > 1) {
+      // v0.6.52：按**可见成员**（激活源）计数——未激活源成员已隐藏
+      if (chips.length > 1) {
         var tools = V.utils.el('div', { className: 'vshell-group-tools' }, [
           V.utils.el('button', {
             className: 'vshell-btn vshell-btn-secondary',
