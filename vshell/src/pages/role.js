@@ -39,6 +39,314 @@
     return V.characters && V.characters.find ? V.characters.find(name) : null;
   }
 
+  /** v0.6.46：角色主页「编辑词汇」浮窗——关键词 / 独立词限制 / 全局排除词
+   *  三区，样式与交互照搬角色管理页（char-panel renderDetail，v0.6.40-43
+   *  全部经验）：
+   *  · 显示用合并条目（list()——跨源同名并集），写入用首源原生条目
+   *    （find()），删除走全源 API（removeKeyword/removeKeywordExclusion/
+   *    removeGlobalExclusion——防「删词后重合并回末尾」）
+   *  · 增删后局部重绘词区；浮窗自身订阅 characters.onChange 同步三区
+   *    （角色页内容区 onChange 重建在 overlay 之下，互不影响）
+   *  · kweOwner 归属关键词为浮窗会话级状态；模块级 wordsDlgClose 保证
+   *    同时只有一个浮窗 */
+  var wordsDlgClose = null;
+  function openWordsDlg(roleName) {
+    if (wordsDlgClose) { try { wordsDlgClose(); } catch (e) { /* noop */ } wordsDlgClose = null; }
+    if (!V.characters || !V.utils) return null;
+    var host = document.querySelector('.vshell-app') || document.body;
+
+    var overlay = V.utils.el('div', {
+      className: 'vshell-modal-backdrop vshell-picker-backdrop',
+    });
+    var box = V.utils.el('div', { className: 'vshell-modal vshell-role-words-box' });
+    box.appendChild(V.utils.el('div', { className: 'vshell-modal-title' }, '编辑角色词汇'));
+    box.appendChild(V.utils.el('div', { className: 'vshell-modal-sub' }, roleName));
+
+    /* ---- 数据源：显示合并条目 / 写首源原生条目 ---- */
+    function curMerged() {
+      var all = V.characters.list();
+      for (var i = 0; i < all.length; i++) {
+        if (all[i] && all[i].name === roleName) return all[i];
+      }
+      return null;
+    }
+    function curNative() { return V.characters.find(roleName); }
+
+    /* ===== 关键词区 ===== */
+    var kwLine = null, kwInputEl = null;
+    function renderKws() {
+      if (!kwLine) return;
+      kwLine.innerHTML = '';
+      var cur = curMerged();
+      ((cur && cur.keywords) || []).forEach(function (k) {
+        kwLine.appendChild(V.utils.el('span', { className: 'vshell-char-kwchip', title: '关键词' }, [
+          V.utils.el('span', { className: 'vshell-char-kwchip-name' }, k),
+          V.utils.el('button', {
+            className: 'vshell-st-chip-del',
+            type: 'button',
+            title: '删除关键词',
+            'aria-label': '删除关键词 ' + k,
+            onclick: function (e) { e.stopPropagation(); removeKw(k); },
+          }, V.utils.el('span', { className: 'codicon codicon-close' })),
+        ]));
+      });
+    }
+    function removeKw(k) {
+      try { V.characters.removeKeyword(roleName, k); } catch (e) { /* noop */ }
+      renderKws();
+    }
+    function doAddKw() {
+      var v = kwInputEl.value.trim();
+      if (!v) return;
+      var cur = curNative();
+      var kws = ((cur && cur.keywords) || []).slice();
+      if (kws.indexOf(v) < 0) kws.push(v);
+      try { V.characters.setKeywords(roleName, kws); } catch (e) { /* noop */ }
+      kwInputEl.value = '';
+      renderKws();
+    }
+    var secKws = V.utils.el('div', { className: 'vshell-char-sec' }, [
+      V.utils.el('div', { className: 'vshell-char-sec-title' }, '关键词'),
+      (function () { kwLine = V.utils.el('div', { className: 'vshell-char-kwline' }); return kwLine; })(),
+      (function () {
+        var add = V.utils.el('div', { className: 'vshell-char-kwadd' });
+        kwInputEl = V.utils.el('input', {
+          className: 'vshell-tag-input', type: 'text', placeholder: '添加关键词…',
+          'aria-label': '添加关键词',
+          onkeydown: function (e) { if (e.key === 'Enter') { e.preventDefault(); doAddKw(); } },
+        });
+        add.appendChild(kwInputEl);
+        add.appendChild(V.utils.el('button', {
+          className: 'vshell-tag-add', type: 'button', title: '添加关键词', 'aria-label': '添加关键词',
+          onclick: doAddKw,
+        }, V.utils.el('span', { className: 'codicon codicon-add' })));
+        return add;
+      })(),
+    ]);
+    renderKws();
+
+    /* ===== 独立词限制区 ===== */
+    var kweLine = null, kweInputEl = null;
+    var kweOwner = null;   // 归属关键词（浮窗会话级，打开即重置）
+    var ownerBtn = null;   // 归属胶囊按钮（函数体级——pickOwner 选择后需刷新）
+    function renderOwner() {
+      if (!ownerBtn) return;
+      ownerBtn.innerHTML = '';
+      ownerBtn.appendChild(V.utils.el('span', { className: 'vshell-char-kwex-owner-name' },
+        kweOwner || '选择关键词'));
+      ownerBtn.classList.toggle('is-empty', !kweOwner);
+    }
+    function renderKwe() {
+      if (!kweLine) return;
+      kweLine.innerHTML = '';
+      var map = {};   // word → [所属关键词...]
+      var cur = curMerged();
+      var kwe = (cur && cur.kwExclusions) || {};
+      Object.keys(kwe).forEach(function (kw) {
+        (kwe[kw] || []).forEach(function (w) {
+          if (!map[w]) map[w] = [];
+          if (map[w].indexOf(kw) < 0) map[w].push(kw);
+        });
+      });
+      Object.keys(map).forEach(function (w) {
+        // 高亮区间：所属关键词在限制词内的出现位置
+        var hl = [];
+        map[w].forEach(function (kw) {
+          if (!kw) return;
+          var p = 0;
+          while (true) {
+            var i = w.indexOf(kw, p);
+            if (i < 0) break;
+            hl.push([i, i + kw.length]);
+            p = i + kw.length;
+          }
+        });
+        hl.sort(function (a, b) { return a[0] - b[0]; });
+        var merged = [];
+        hl.forEach(function (h) {
+          if (merged.length && h[0] <= merged[merged.length - 1][1]) {
+            merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], h[1]);
+          } else merged.push(h.slice());
+        });
+        var chip = V.utils.el('span', {
+          className: 'vshell-char-kwchip vshell-char-kwex-chip',
+          title: '独立词限制：' + map[w].join('、'),
+        });
+        var nameEl = V.utils.el('span', { className: 'vshell-char-kwchip-name' });
+        var pos = 0;
+        merged.forEach(function (h) {
+          if (h[0] > pos) nameEl.appendChild(document.createTextNode(w.slice(pos, h[0])));
+          nameEl.appendChild(V.utils.el('span', { className: 'vshell-char-kwex-hl' }, w.slice(h[0], h[1])));
+          pos = h[1];
+        });
+        if (pos < w.length) nameEl.appendChild(document.createTextNode(w.slice(pos)));
+        chip.appendChild(nameEl);
+        chip.appendChild(V.utils.el('button', {
+          className: 'vshell-st-chip-del',
+          type: 'button',
+          title: '删除独立词限制',
+          'aria-label': '删除独立词限制 ' + w,
+          onclick: function (e) { e.stopPropagation(); removeKwe(w, map[w]); },
+        }, V.utils.el('span', { className: 'codicon codicon-close' })));
+        kweLine.appendChild(chip);
+      });
+    }
+    function removeKwe(w, kws) {
+      kws.forEach(function (kw) {
+        try { V.characters.removeKeywordExclusion(roleName, kw, w); } catch (e) { /* noop */ }
+      });
+      renderKwe();
+    }
+    function pickOwner() {
+      var cur = curNative();
+      var kws = ((cur && cur.keywords) || []).slice();
+      if (!kws.length) { V.toast.info('请先在「关键词」区添加关键词'); return; }
+      var o = V.utils.el('div', { className: 'vshell-modal-backdrop vshell-picker-backdrop' });
+      var b = V.utils.el('div', { className: 'vshell-modal vshell-tag-modal vshell-char-kwex-pick' });
+      var listEl = V.utils.el('div', { className: 'vshell-char-kwex-line' });
+      kws.forEach(function (kw) {
+        var chip = V.utils.el('span', { className: 'vshell-char-kwchip', title: '归属关键词：' + kw },
+          V.utils.el('span', { className: 'vshell-char-kwchip-name' }, kw));
+        chip.onclick = function () { kweOwner = kw; renderOwner(); close(); };
+        listEl.appendChild(chip);
+      });
+      b.appendChild(listEl);
+      function close() {
+        if (o.parentNode) o.parentNode.removeChild(o);
+        document.removeEventListener('keydown', esc);
+      }
+      function esc(e) { if (e.key === 'Escape') close(); }
+      o.appendChild(b);
+      o.addEventListener('mousedown', function (e) { if (e.target === o) close(); });
+      document.addEventListener('keydown', esc);
+      document.body.appendChild(o);
+    }
+    function doAddKwe() {
+      var v = kweInputEl.value.trim();
+      if (!v) return;
+      if (!kweOwner) { V.toast.info('请先点击输入框左侧胶囊选择归属关键词'); return; }
+      if (v.indexOf(kweOwner) < 0) {
+        V.toast.error('独立限制词「' + v + '」未包含所选关键词「' + kweOwner + '」，已取消');
+        return;
+      }
+      var cur = curNative();
+      var kwe = (cur && cur.kwExclusions) || {};
+      var list = (kwe[kweOwner] || []).slice();
+      if (list.indexOf(v) < 0) list.push(v);
+      try { V.characters.setKeywordExclusions(roleName, kweOwner, list); } catch (e) { /* noop */ }
+      kweInputEl.value = '';
+      renderKwe();
+    }
+    var secKwe = V.utils.el('div', { className: 'vshell-char-sec' }, [
+      V.utils.el('div', { className: 'vshell-char-sec-title' }, '独立词限制'),
+      (function () { kweLine = V.utils.el('div', { className: 'vshell-char-kwex-line' }); return kweLine; })(),
+      (function () {
+        var add = V.utils.el('div', { className: 'vshell-char-kwadd' });
+        ownerBtn = V.utils.el('button', {
+          type: 'button',
+          className: 'vshell-char-kwex-owner is-empty',
+          title: '选择归属关键词',
+          'aria-label': '选择归属关键词',
+          onclick: pickOwner,
+        });
+        renderOwner();
+        add.appendChild(ownerBtn);
+        kweInputEl = V.utils.el('input', {
+          className: 'vshell-tag-input', type: 'text', placeholder: '添加独立词限制…',
+          'aria-label': '添加独立词限制',
+          onkeydown: function (e) { if (e.key === 'Enter') { e.preventDefault(); doAddKwe(); } },
+        });
+        add.appendChild(kweInputEl);
+        add.appendChild(V.utils.el('button', {
+          className: 'vshell-tag-add', type: 'button', title: '添加独立词限制', 'aria-label': '添加独立词限制',
+          onclick: doAddKwe,
+        }, V.utils.el('span', { className: 'codicon codicon-add' })));
+        return add;
+      })(),
+    ]);
+    renderKwe();
+
+    /* ===== 全局排除词区 ===== */
+    var exLine = null, exInputEl = null;
+    function renderExcls() {
+      if (!exLine) return;
+      exLine.innerHTML = '';
+      var cur = curMerged();
+      ((cur && cur.globalExclusions) || []).forEach(function (x) {
+        exLine.appendChild(V.utils.el('span', { className: 'vshell-char-kwchip', title: '全局排除词' }, [
+          V.utils.el('span', { className: 'vshell-char-kwchip-name' }, x),
+          V.utils.el('button', {
+            className: 'vshell-st-chip-del',
+            type: 'button',
+            title: '删除全局排除词',
+            'aria-label': '删除全局排除词 ' + x,
+            onclick: function (e) { e.stopPropagation(); removeExcl(x); },
+          }, V.utils.el('span', { className: 'codicon codicon-close' })),
+        ]));
+      });
+    }
+    function removeExcl(x) {
+      try { V.characters.removeGlobalExclusion(roleName, x); } catch (e) { /* noop */ }
+      renderExcls();
+    }
+    function doAddExcl() {
+      var v = exInputEl.value.trim();
+      if (!v) return;
+      var cur = curNative();
+      var excls = ((cur && cur.globalExclusions) || []).slice();
+      if (excls.indexOf(v) < 0) excls.push(v);
+      try { V.characters.setGlobalExclusions(roleName, excls); } catch (e) { /* noop */ }
+      exInputEl.value = '';
+      renderExcls();
+    }
+    var secExcls = V.utils.el('div', { className: 'vshell-char-sec' }, [
+      V.utils.el('div', { className: 'vshell-char-sec-title' }, '全局排除词'),
+      (function () { exLine = V.utils.el('div', { className: 'vshell-char-exline' }); return exLine; })(),
+      (function () {
+        var add = V.utils.el('div', { className: 'vshell-char-kwadd' });
+        exInputEl = V.utils.el('input', {
+          className: 'vshell-tag-input', type: 'text', placeholder: '添加全局排除词…',
+          'aria-label': '添加全局排除词',
+          onkeydown: function (e) { if (e.key === 'Enter') { e.preventDefault(); doAddExcl(); } },
+        });
+        add.appendChild(exInputEl);
+        add.appendChild(V.utils.el('button', {
+          className: 'vshell-tag-add', type: 'button', title: '添加全局排除词', 'aria-label': '添加全局排除词',
+          onclick: doAddExcl,
+        }, V.utils.el('span', { className: 'codicon codicon-add' })));
+        return add;
+      })(),
+    ]);
+    renderExcls();
+
+    box.appendChild(secKws);
+    box.appendChild(secKwe);
+    box.appendChild(secExcls);
+    box.appendChild(V.utils.el('button', {
+      className: 'vshell-btn vshell-btn-secondary',
+      type: 'button',
+      onclick: closeDlg,
+    }, '关闭'));
+    overlay.appendChild(box);
+    host.appendChild(overlay);
+
+    /* ---- 关闭 + 外部 onChange 同步（词区局部重绘）---- */
+    var off = null;
+    function syncWords() { renderKws(); renderKwe(); renderExcls(); }
+    function closeDlg() {
+      if (off) { try { off(); } catch (e) { /* noop */ } off = null; }
+      document.removeEventListener('keydown', esc);
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      if (wordsDlgClose === closeDlg) wordsDlgClose = null;
+    }
+    function esc(e) { if (e.key === 'Escape') closeDlg(); }
+    overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) closeDlg(); });
+    document.addEventListener('keydown', esc);
+    off = V.characters.onChange(syncWords);
+    wordsDlgClose = closeDlg;
+    return closeDlg;
+  }
+
   function mount(outlet, params) {
     // v0.5.6 第十三轮需求 8：全屏（抖音刷）下点击进入角色主页 → 自动
     // 退出全屏（原生 fullscreen 走 top layer，角色页会被盖在全屏之下）
@@ -242,15 +550,36 @@
     nameRow = V.utils.el('div', { className: 'vshell-role-dname-row' });
 
     var statsEl = null;
+    // v0.6.46：关键词行（chips + hover 编辑按钮）——characters.onChange 时局部刷新
+    var chipsRowEl = null;
+    var chipsEditBtn = null;
+    function renderChips() {
+      if (!chipsRowEl) return;
+      chipsRowEl.innerHTML = '';
+      var cur = mergedRole(role.name) || role;
+      (cur.keywords || []).filter(Boolean).forEach(function (k) {
+        chipsRowEl.appendChild(V.utils.el('span', { className: 'vshell-st-chip' },
+          V.utils.el('span', { className: 'vshell-st-chip-label' }, k)));
+      });
+      if (chipsEditBtn) chipsRowEl.appendChild(chipsEditBtn);
+    }
     var head = V.utils.el('div', { className: 'vshell-role-head' }, [
       avatarWrap,
       V.utils.el('div', { className: 'vshell-role-head-info' }, [
         nameRow,
-        V.utils.el('div', { className: 'vshell-role-chips' },
-          (role.keywords || []).filter(Boolean).map(function (k) {
-            return V.utils.el('span', { className: 'vshell-st-chip' },
-              V.utils.el('span', { className: 'vshell-st-chip-label' }, k));
-          })),
+        (function () {
+          // v0.6.46：关键词行尾 hover 显示的「编辑词汇」按钮 → 词编辑浮窗
+          chipsRowEl = V.utils.el('div', { className: 'vshell-role-chips' });
+          chipsEditBtn = V.utils.el('button', {
+            className: 'vshell-icon-btn vshell-role-chips-edit',
+            type: 'button',
+            title: '编辑关键词/排除词',
+            'aria-label': '编辑关键词/排除词',
+            onclick: function () { openWordsDlg(role.name); },
+          }, V.utils.el('span', { className: 'codicon codicon-edit' }));
+          renderChips();
+          return chipsRowEl;
+        })(),
         (function () {
           statsEl = V.utils.el('div', { className: 'vshell-role-stats' }, '手动添加 '
             + V.characters.videosOf(role.name).length + ' · 聚合搜索计算中');
@@ -981,6 +1310,7 @@
     var offChars = V.characters ? V.characters.onChange(function () {
       renderByMode();
       renderMarquee();
+      renderChips();   // v0.6.46：词增删（词编辑浮窗）→ banner 关键词行同步
     }) : null;
 
     return {

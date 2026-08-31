@@ -615,6 +615,39 @@
 .vshell-role-avatar-wrap:hover .vshell-role-avatar-box img {
   filter: brightness(0.6);
 }
+/* v0.6.46：角色名重命名 / 背景图 / 关键词 三个编辑按钮——仅对应组件悬停时显示 */
+.vshell-role-dname-row .vshell-char-name-edit,
+.vshell-role-banner-edit,
+.vshell-role-chips-edit {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.vshell-role-dname-row:hover .vshell-char-name-edit,
+.vshell-role-banner:hover .vshell-role-banner-edit,
+.vshell-role-chips:hover .vshell-role-chips-edit {
+  opacity: 1;
+}
+/* v0.6.46：关键词行编辑按钮——小号（16px），与 chips 行内对齐 */
+.vshell-role-chips-edit {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  flex: none;
+  align-self: center;
+}
+.vshell-role-chips-edit:hover {
+  color: var(--vscode-foreground);
+  background: rgba(127, 127, 127, 0.25);
+  transform: none;
+}
+/* v0.6.46：角色主页「编辑词汇」浮窗（关键词/独立词/全局排除词三区，
+   样式照搬角色管理页 .vshell-char-sec 系列）——内容超高时可滚动 */
+.vshell-role-words-box {
+  max-height: 72vh;
+  overflow-y: auto;
+}
 .vshell-role-chips {
   display: flex;
   flex-wrap: wrap;
