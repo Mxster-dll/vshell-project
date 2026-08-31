@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.12
+// @version      0.6.13
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.12';
+window.VShell.version = '0.6.13';
 
 /* vshell 入口见 src/app.js */
 
@@ -14273,7 +14273,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     page.appendChild(backBtn);
     buildActions();
 
-    /** v0.6.12 静态操作行（挂 contentBox 底部，loadMember 的 layout 插到其前） */
+    /** v0.6.12 静态操作行（不挂载——由 loadMember 挂到主区底部，
+     *  数据到达后 renderMain 移至播放卡片正下方；v0.6.12b 修正位置） */
     function buildActions() {
       actionsRow = V.utils.el('div', { className: 'vshell-detail-actions' });
       watchBtn = actionBtn('codicon-add', '待看', 'watch');
@@ -14301,7 +14302,6 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         V.utils.el('span', { className: 'codicon codicon-sync' }),
         V.utils.el('span', { className: 'vshell-btn-text' }, '重新识别'),
       ]));
-      contentBox.appendChild(actionsRow);
     }
 
     /** v0.6.12 待看/收藏点击（详情未就绪 → 记录意图，到达后自动执行） */
@@ -14321,6 +14321,14 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       if (!watchBtn || !curDetail || typeof curDetail !== 'object') return;
       watchBtn.classList.toggle('is-active', V.saved.isWatch(curDetail.id, curDetail.sourceId));
       favBtn.classList.toggle('is-active', V.saved.isFav(curDetail.id, curDetail.sourceId));
+    }
+
+    /** v0.6.12b：清空主区但保留静态操作行（从 main 摘下后重新挂回底部；
+     *  调用方在 clearMain 后把骨架/空态 insertBefore(actionsRow)） */
+    function clearMain() {
+      var ak = actionsRow.parentNode === main ? main.removeChild(actionsRow) : null;
+      main.innerHTML = '';
+      if (ak) main.appendChild(ak);
     }
 
     var currentTitle = '';
@@ -14366,17 +14374,20 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         side = V.utils.el('div', { className: 'vshell-detail-side' });
         layout.appendChild(main);
         layout.appendChild(side);
-        // v0.6.12：操作行（静态）在底部——layout 插到其前
-        contentBox.insertBefore(layout, actionsRow);
+        contentBox.appendChild(layout);
+        // v0.6.12b：静态操作行挂主区底部——加载中/空态也可见，
+        // 数据到达后由 renderMain 移至播放卡片正下方（紧贴卡片）
+        main.appendChild(actionsRow);
       }
-      main.innerHTML = '';
+      // v0.6.12b：清空主区但保留操作行
+      clearMain();
       side.innerHTML = '';
-      // 局部加载动画（骨架 pulse；主区播放器大块 + 行，侧栏行）
-      main.appendChild(V.utils.el('div', { className: 'vshell-detail-skeleton' }, [
+      // 局部加载动画（骨架 pulse；主区播放器大块 + 行，侧栏行）——插到操作行前
+      main.insertBefore(V.utils.el('div', { className: 'vshell-detail-skeleton' }, [
         V.utils.el('div', { className: 'vshell-skeleton-block vshell-skeleton-player' }),
         V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '60%' } }),
         V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '35%' } }),
-      ]));
+      ]), actionsRow);
       side.appendChild(V.utils.el('div', { className: 'vshell-detail-skeleton' }, [
         V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '85%' } }),
         V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '70%' } }),
@@ -14386,13 +14397,13 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       // 源未启用：直接空态，不发起网络请求（避免网络失败提示掩盖未启用提示）
       var disMsg2 = srcDisabledMsg();
       if (disMsg2) {
-        main.innerHTML = '';
-        main.appendChild(V.wall.empty(disMsg2, 'codicon-error'));
+        clearMain();
+        main.insertBefore(V.wall.empty(disMsg2, 'codicon-error'), actionsRow);
         return;
       }
       if (!adapter && !isLocal) {
-        main.innerHTML = '';
-        main.appendChild(V.wall.empty(srcDisabledMsg() || '数据源不可用', 'codicon-error'));
+        clearMain();
+        main.insertBefore(V.wall.empty(srcDisabledMsg() || '数据源不可用', 'codicon-error'), actionsRow);
         return;
       }
       // v0.5.6 第十二轮需求 2：本地视频数据源——不查网站接口，
@@ -14400,8 +14411,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       if (isLocal && V.localVideos) {
         var lv = V.localVideos.find('local:' + mId);
         if (!lv) {
-          main.innerHTML = '';
-          main.appendChild(V.wall.empty('本地视频不存在或已删除', 'codicon-error'));
+          clearMain();
+          main.insertBefore(V.wall.empty('本地视频不存在或已删除', 'codicon-error'), actionsRow);
         } else {
           var ldetail = {
             id: 'local:' + mId, bvid: 'local:' + mId, cid: 0,
@@ -14410,7 +14421,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
             pubdate: lv.pubdate || 0, duration: lv.duration || 0,
             tname: '本地视频', local: true,
           };
-          main.innerHTML = '';
+          clearMain();
           renderMain(ldetail);
           V.localVideos.playInfo(lv).then(function (pi) {
             if (done) return;
@@ -14430,11 +14441,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         // 空态而非崩溃（修复 "Cannot set properties of null (setting 'sourceId')"）；
         // 源未启用时优先提示去设置启用（角色页快照卡常见）
         if (!detail || typeof detail !== 'object') {
-          main.innerHTML = '';
-          main.appendChild(V.wall.empty(srcDisabledMsg() || '详情加载失败：视频不存在或已失效', 'codicon-error'));
+          clearMain();
+          main.insertBefore(V.wall.empty(srcDisabledMsg() || '详情加载失败：视频不存在或已失效', 'codicon-error'), actionsRow);
           return;
         }
-        main.innerHTML = '';
+        clearMain();
         renderMain(detail);
         // 播放源（可失败：未登录/风控 → toast）
         adapter.getPlayInfo(mId, detail.cid).then(function (pi) {
@@ -14447,8 +14458,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         });
       }).catch(function (e) {
         if (done) return;
-        main.innerHTML = '';
-        main.appendChild(V.wall.empty('详情加载失败：' + e.message, 'codicon-error'));
+        clearMain();
+        main.insertBefore(V.wall.empty('详情加载失败：' + e.message, 'codicon-error'), actionsRow);
       });
       // ---- 相关推荐区：独立加载（失败静默清空） ----
       adapter.getRelated(mId).then(function (related) {
@@ -14615,6 +14626,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         pendingAction = null;
         doSaveAction(pa);
       }
+      // v0.6.12b：操作行从主区底部摘下——内容按序填充后，
+      // 在播放卡片正下方挂回（紧贴视频卡片，简介在其后）
+      var akMain = actionsRow.parentNode === main ? main.removeChild(actionsRow) : null;
 
       // 两栏容器已在 loadMember 建好（v0.6.11），main 直接填充
       // 1. 标题（顶部）+ 复制按钮（点击后按钮自身有小动画：图标变对勾 + 脉冲）
@@ -14782,8 +14796,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       playerCard.appendChild(player.root);
       main.appendChild(playerCard);
 
-      // 5. 操作行（v0.6.12：已静态创建——mount 时挂 contentBox 底部，
-      // 加载中也可见可用；此处仅刷新状态）
+      // 5. 操作行（v0.6.12 静态创建，加载中/空态也可见可用；
+      // v0.6.12b：紧贴播放卡片正下方——播放卡后挂回，简介在其后）
+      if (akMain) main.appendChild(akMain);
       refreshSaveBtns();
 
       // 6. 简介（超长折叠）
