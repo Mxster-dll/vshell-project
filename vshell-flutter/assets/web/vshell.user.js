@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.46
+// @version      0.6.47
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.46';
+window.VShell.version = '0.6.47';
 
 /* vshell 入口见 src/app.js */
 
@@ -25861,17 +25861,21 @@ body.vshell-dragging a { pointer-events: none; }
 .vshell-role-chips:hover .vshell-role-chips-edit {
   opacity: 1;
 }
-/* v0.6.46：关键词行编辑按钮——小号（16px），与 chips 行内对齐 */
-.vshell-role-chips-edit {
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  font-size: 12px;
-  color: var(--vscode-descriptionForeground);
+/* v0.6.47：关键词行编辑按钮——小号（14px），与 chips 行内对齐；
+   .vshell 前缀压过 base .vshell .vshell-icon-btn(32px)（否则 18px 不生效） */
+.vshell .vshell-role-chips-edit {
   flex: none;
   align-self: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
 }
-.vshell-role-chips-edit:hover {
+.vshell .vshell-role-chips-edit .codicon {
+  font-size: 10px;
+}
+.vshell .vshell-role-chips-edit:hover {
   color: var(--vscode-foreground);
   background: rgba(127, 127, 127, 0.25);
   transform: none;
