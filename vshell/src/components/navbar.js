@@ -25,8 +25,8 @@
     var brand = V.utils.el('span', { className: 'vshell-nav-brand' }, [
       V.utils.el('span', { className: 'vshell-nav-brand-dot' }),
       V.utils.el('span', { className: 'vshell-nav-brand-text' }, 'VShell'),
-      // 版本号：构建版本（meta.js V.version，与 app.html ?v=N 同步）
-      V.utils.el('span', { className: 'vshell-nav-brand-ver' }, V.version || ''),
+      // 版本号：构建版本（meta.js V.version=SemVer 0.6.x，与 app.html ?v=N 同步）
+      V.utils.el('span', { className: 'vshell-nav-brand-ver' }, V.version ? ('v' + V.version) : ''),
     ]);
 
     // 右：搜索框 = 多输入框胶囊编辑器（v0.3.26 重构，用户需求）：

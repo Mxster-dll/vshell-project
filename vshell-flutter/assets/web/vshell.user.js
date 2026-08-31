@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.5.6
+// @version      0.6.4
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = 'v67';
+window.VShell.version = '0.6.4';
 
 /* vshell 入口见 src/app.js */
 
@@ -5008,8 +5008,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var brand = V.utils.el('span', { className: 'vshell-nav-brand' }, [
       V.utils.el('span', { className: 'vshell-nav-brand-dot' }),
       V.utils.el('span', { className: 'vshell-nav-brand-text' }, 'VShell'),
-      // 版本号：构建版本（meta.js V.version，与 app.html ?v=N 同步）
-      V.utils.el('span', { className: 'vshell-nav-brand-ver' }, V.version || ''),
+      // 版本号：构建版本（meta.js V.version=SemVer 0.6.x，与 app.html ?v=N 同步）
+      V.utils.el('span', { className: 'vshell-nav-brand-ver' }, V.version ? ('v' + V.version) : ''),
     ]);
 
     // 右：搜索框 = 多输入框胶囊编辑器（v0.3.26 重构，用户需求）：
@@ -17495,7 +17495,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     // 关于（版本号显示构建版本 v，与导航栏左上角一致）
     body.appendChild(sec('关于', V.utils.el('div', {
       className: 'vshell-settings-about',
-    }, 'vshell ' + (V.version || '') + ' · VS Code Modern 主题')));
+    }, 'vshell ' + (V.version ? 'v' + V.version : '') + ' · VS Code Modern 主题')));
 
     page.appendChild(body);
     outlet.appendChild(page);
