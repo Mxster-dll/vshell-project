@@ -489,6 +489,9 @@
     var n = selectedCards().length;
     multi.countEl.textContent = '已选 ' + n + ' 张';
     multi.btns.forEach(function (b) {
+      // v0.6.8 取消按钮永不禁用——0 选中时也必须能点（disabled 按钮
+      // 真实鼠标点击不触发 onclick，此前导致无法退出多选）
+      if (b.dataset.cancel) { b.disabled = false; return; }
       b.disabled = !(n >= 1) || (b.dataset.min2 && n < 2);
     });
   }
@@ -533,11 +536,12 @@
     });
     mk('添加到组', 'vshell-btn', false, function (ms) { pickGroup(ms); });
     // v0.6.8 修复：取消按钮不走 mk 的选中检查——0 个选中（含初始默认选中
-    // 被手动取消）时也必须能退出多选状态
+    // 被手动取消）时也必须能退出多选状态（updateBar 对其跳过禁用）
     var cancelBtn = V.utils.el('button', {
       className: 'vshell-btn vshell-btn-secondary', type: 'button',
       onclick: function () { exitMultiSelect(); },
     }, '取消');
+    cancelBtn.dataset.cancel = '1';   // updateBar 跳过禁用
     multi.btns.push(cancelBtn);
     bar.appendChild(cancelBtn);
     var host = document.querySelector('.vshell-app') || document.body;
