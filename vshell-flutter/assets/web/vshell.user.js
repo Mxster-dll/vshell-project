@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.17
+// @version      0.6.18
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,9 +24,10 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.17';
+window.VShell.version = '0.6.18';
 
 /* vshell 入口见 src/app.js */
+
 
 
 
@@ -7543,6 +7544,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     card.__orig = origItem;
     // v0.6.15：点击进详情前记录卡片快照（详情页加载中先用卡片标题/封面
     // 占位，加载完成后由详情数据替换）——捕获阶段统一覆盖 media/title/meta 链接
+    // v0.6.18：快照扩展播放量/弹幕/日期（信息条同样先显示卡片值）
     card.addEventListener('click', function (e) {
       var a = e.target && e.target.closest ? e.target.closest('a[href^="#/video/"]') : null;
       if (!a) return;
@@ -7551,6 +7553,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         id: item.id,
         title: item.title || '',
         pic: item.pic || item.cover || '',
+        view: item.stat && item.stat.view,
+        danmaku: item.stat && item.stat.danmaku,
+        pubdate: item.pubdate || 0,
       };
     }, true);
     if (V.aggUi) {
@@ -14361,11 +14366,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     }
 
     /** v0.6.14：同构骨架——主区骨架与真实 renderMain 布局一致：
-     *  标题行（条+禁用复制钮）→ 信息条（播放/弹幕/日期/时长小块）→
+     *  标题行（条+禁用复制钮）→ 信息条（播放量行）→
      *  UP 行（头像圆+名字条）→ 播放卡片（16:9 大块）；
      *  操作行（真实静态）与简介骨架由 loadMember 在外部按序挂载。
-     *  v0.6.15：snap 为来源卡片快照——标题显示真实文本、封面显示真实图
-     *  （无快照/无值则回落骨架占位）；加载完成后 renderMain 整体替换 */
+     *  v0.6.15/18：snap 为来源卡片快照——标题/封面/播放量行（播放/弹幕/
+     *  日期）先显示卡片真实值（无快照/无值则回落骨架占位）；
+     *  加载完成后 renderMain 整体替换为详情数据 */
     function skeletonMain(snap) {
       snap = snap || null;
       var titleEl = (snap && snap.title)
@@ -14376,6 +14382,25 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
             className: 'vshell-detail-poster-skel', src: snap.pic, alt: '',
           })
         : V.utils.el('div', { className: 'vshell-skeleton-block vshell-skeleton-player' });
+      // v0.6.18：信息条先显示卡片播放量/弹幕/日期（无快照值 → 骨架条）
+      var statsBody;
+      if (snap && (snap.view || snap.danmaku || snap.pubdate)) {
+        statsBody = [
+          snap.view
+            ? V.utils.el('span', { className: 'vshell-detail-stats-item' },
+                V.utils.fmtCount(snap.view) + ' 播放')
+            : null,
+          snap.danmaku
+            ? V.utils.el('span', { className: 'vshell-detail-stats-item' },
+                V.utils.fmtCount(snap.danmaku) + ' 弹幕')
+            : null,
+          snap.pubdate
+            ? V.utils.el('span', { className: 'vshell-detail-stats-item' }, fmtDate(snap.pubdate))
+            : null,
+        ];
+      } else {
+        statsBody = [V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '45%' } })];
+      }
       return V.utils.el('div', { className: 'vshell-detail-skeleton vshell-detail-skeleton-iso' }, [
         // 1. 标题行：标题（快照文本或骨架条）+ 禁用的复制按钮（布局与真实一致）
         V.utils.el('div', { className: 'vshell-detail-title-row' }, [
@@ -14386,10 +14411,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
             title: '复制视频标题（加载中）', 'aria-label': '复制视频标题',
           }, V.utils.el('span', { className: 'codicon codicon-copy' })),
         ]),
-        // 2. 信息条：播放量/弹幕/日期/时长 一行（v0.6.16：一个条而非多个小块）
-        V.utils.el('div', { className: 'vshell-detail-stats' }, [
-          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '45%' } }),
-        ]),
+        // 2. 信息条：卡片播放量/弹幕/日期（或骨架条）
+        V.utils.el('div', { className: 'vshell-detail-stats' }, statsBody),
         // 3. UP/角色行：头像圆 + 角色名条
         V.utils.el('div', { className: 'vshell-detail-up' }, [
           V.utils.el('span', { className: 'vshell-skeleton-circle' }),

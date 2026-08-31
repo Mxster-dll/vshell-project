@@ -663,6 +663,7 @@
     card.__orig = origItem;
     // v0.6.15：点击进详情前记录卡片快照（详情页加载中先用卡片标题/封面
     // 占位，加载完成后由详情数据替换）——捕获阶段统一覆盖 media/title/meta 链接
+    // v0.6.18：快照扩展播放量/弹幕/日期（信息条同样先显示卡片值）
     card.addEventListener('click', function (e) {
       var a = e.target && e.target.closest ? e.target.closest('a[href^="#/video/"]') : null;
       if (!a) return;
@@ -671,6 +672,9 @@
         id: item.id,
         title: item.title || '',
         pic: item.pic || item.cover || '',
+        view: item.stat && item.stat.view,
+        danmaku: item.stat && item.stat.danmaku,
+        pubdate: item.pubdate || 0,
       };
     }, true);
     if (V.aggUi) {
