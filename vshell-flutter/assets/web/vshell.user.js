@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.31
+// @version      0.6.32
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.31';
+window.VShell.version = '0.6.32';
 
 /* vshell 入口见 src/app.js */
 
@@ -7358,6 +7358,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     opts = opts || {};
     // v0.5.6 需求：角色主页视频墙不显示左上角角色头像角标（noTagIcon）
     var noTagIcon = !!opts.noTagIcon;
+    // v0.6.32 角色主页：不显示**当前角色**头像，但多角色视频仍显示
+    // 其他角色头像（excludeRole = 当前角色名；与 noTagIcon 互斥）
+    var excludeRole = opts.excludeRole ? String(opts.excludeRole) : null;
     // v0.5.6 第二十二轮需求 2：本地视频卡封面兜底——saved 快照（待看/收藏
     // 页）/旧角色快照在导入时 cover 可能为空，卡片渲染时从 localVideos
     // 内存补（find 同时会触发懒截帧自愈，封面稍后生成）
@@ -7698,6 +7701,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       if (noTagIcon) { tagIcons.style.display = 'none'; return; }   // 角色主页：不显示角标
       var cres2 = charsMod && charsMod.charFor ? charsMod.charFor(item.id, item) : { kind: 'none' };
       var charList2 = cres2.kind === 'char' ? (cres2.chars || []) : [];
+      // v0.6.32：角色主页排除当前角色头像（多角色时显示其他角色）
+      if (excludeRole) {
+        charList2 = charList2.filter(function (rc) { return rc.name !== excludeRole; });
+      }
       tagIcons.innerHTML = '';
       var MAX_ICONS = 3;
       charList2.slice(0, MAX_ICONS).forEach(function (rc) {
@@ -7791,7 +7798,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         V.utils.el('span', { className: 'codicon codicon-unverified' })));
     }
     if (savedMarks) media.appendChild(savedMarks);
-    if (tagIcons && !noTagIcon) media.appendChild(tagIcons);
+    if (tagIcons && (!noTagIcon || excludeRole)) media.appendChild(tagIcons);
     // 封面布局：标题浮层最后渲染（层叠最高，悬停浮层 z-3 仍可盖住角落按钮）
     if (cover) media.appendChild(title);
 
@@ -17404,8 +17411,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         if (!it || !it.id || renderedIds[it.id]) return;
         renderedIds[it.id] = true;
         // v0.5.6 第十二轮需求 8：代表作圆点
+        // v0.6.32：增量追加卡同样排除当前角色头像
         var card = V.videoCard.create(it, {
-          noRoleMeta: true, layout: V.wall.layout(),
+          noRoleMeta: true, excludeRole: role.name, layout: V.wall.layout(),
           featured: isFeat(it.id),
         });
         card.style.setProperty('--i', String(added % 12));
@@ -17449,8 +17457,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       var wrap = V.utils.el('div', { className: 'vshell-wall' + (l === 'cover' ? ' is-cover' : '') });
       merged.forEach(function (it, i) {
         // v0.5.6 第十二轮需求 8：代表作卡右上角圆点（savedMarks is-featured-mark）
+        // v0.6.32：视频墙左上角排除**当前角色**头像（多角色视频显示其他角色）
         var card = V.videoCard.create(it, {
-          noRoleMeta: true, noTagIcon: true, layout: l, featured: isFeat(it.id),
+          noRoleMeta: true, excludeRole: role.name, layout: l, featured: isFeat(it.id),
         });
         card.style.setProperty('--i', String(i % 12));
         if (renderedIds[it.id]) card.classList.add('no-anim');

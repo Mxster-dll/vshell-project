@@ -459,8 +459,9 @@
         if (!it || !it.id || renderedIds[it.id]) return;
         renderedIds[it.id] = true;
         // v0.5.6 第十二轮需求 8：代表作圆点
+        // v0.6.32：增量追加卡同样排除当前角色头像
         var card = V.videoCard.create(it, {
-          noRoleMeta: true, layout: V.wall.layout(),
+          noRoleMeta: true, excludeRole: role.name, layout: V.wall.layout(),
           featured: isFeat(it.id),
         });
         card.style.setProperty('--i', String(added % 12));
@@ -504,8 +505,9 @@
       var wrap = V.utils.el('div', { className: 'vshell-wall' + (l === 'cover' ? ' is-cover' : '') });
       merged.forEach(function (it, i) {
         // v0.5.6 第十二轮需求 8：代表作卡右上角圆点（savedMarks is-featured-mark）
+        // v0.6.32：视频墙左上角排除**当前角色**头像（多角色视频显示其他角色）
         var card = V.videoCard.create(it, {
-          noRoleMeta: true, noTagIcon: true, layout: l, featured: isFeat(it.id),
+          noRoleMeta: true, excludeRole: role.name, layout: l, featured: isFeat(it.id),
         });
         card.style.setProperty('--i', String(i % 12));
         if (renderedIds[it.id]) card.classList.add('no-anim');

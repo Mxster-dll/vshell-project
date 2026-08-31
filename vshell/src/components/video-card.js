@@ -33,6 +33,9 @@
     opts = opts || {};
     // v0.5.6 需求：角色主页视频墙不显示左上角角色头像角标（noTagIcon）
     var noTagIcon = !!opts.noTagIcon;
+    // v0.6.32 角色主页：不显示**当前角色**头像，但多角色视频仍显示
+    // 其他角色头像（excludeRole = 当前角色名；与 noTagIcon 互斥）
+    var excludeRole = opts.excludeRole ? String(opts.excludeRole) : null;
     // v0.5.6 第二十二轮需求 2：本地视频卡封面兜底——saved 快照（待看/收藏
     // 页）/旧角色快照在导入时 cover 可能为空，卡片渲染时从 localVideos
     // 内存补（find 同时会触发懒截帧自愈，封面稍后生成）
@@ -373,6 +376,10 @@
       if (noTagIcon) { tagIcons.style.display = 'none'; return; }   // 角色主页：不显示角标
       var cres2 = charsMod && charsMod.charFor ? charsMod.charFor(item.id, item) : { kind: 'none' };
       var charList2 = cres2.kind === 'char' ? (cres2.chars || []) : [];
+      // v0.6.32：角色主页排除当前角色头像（多角色时显示其他角色）
+      if (excludeRole) {
+        charList2 = charList2.filter(function (rc) { return rc.name !== excludeRole; });
+      }
       tagIcons.innerHTML = '';
       var MAX_ICONS = 3;
       charList2.slice(0, MAX_ICONS).forEach(function (rc) {
@@ -466,7 +473,7 @@
         V.utils.el('span', { className: 'codicon codicon-unverified' })));
     }
     if (savedMarks) media.appendChild(savedMarks);
-    if (tagIcons && !noTagIcon) media.appendChild(tagIcons);
+    if (tagIcons && (!noTagIcon || excludeRole)) media.appendChild(tagIcons);
     // 封面布局：标题浮层最后渲染（层叠最高，悬停浮层 z-3 仍可盖住角落按钮）
     if (cover) media.appendChild(title);
 
