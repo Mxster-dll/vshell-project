@@ -282,7 +282,13 @@
       }
       refresh();
     }) : null;
-    var offLayout = V.wall ? V.wall.onLayoutChange(refresh) : null;
+    // v0.3.36：卡片布局切换 → **全量重建**（不能用 refresh——refresh 先走
+    // mwInst.updateChars 差量分支，返回卡片数>0 即短路 return，布局永不重建
+    // （v0.6.26 用户反馈「点击切换布局没反应」根因））
+    var offLayout = V.wall ? V.wall.onLayoutChange(function () {
+      if (state.done) return;
+      render();
+    }) : null;
     var offMode = V.viewMode ? V.viewMode.onChange(render) : null;
     // v0.5.7 多源：源集合/隐私/k 变化 → 重建
     var offMulti = V.multisource ? V.multisource.onChange(function () {

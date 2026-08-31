@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.26
+// @version      0.6.27
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.26';
+window.VShell.version = '0.6.27';
 
 /* vshell 入口见 src/app.js */
 
@@ -14255,7 +14255,13 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       }
       refresh();
     }) : null;
-    var offLayout = V.wall ? V.wall.onLayoutChange(refresh) : null;
+    // v0.3.36：卡片布局切换 → **全量重建**（不能用 refresh——refresh 先走
+    // mwInst.updateChars 差量分支，返回卡片数>0 即短路 return，布局永不重建
+    // （v0.6.26 用户反馈「点击切换布局没反应」根因））
+    var offLayout = V.wall ? V.wall.onLayoutChange(function () {
+      if (state.done) return;
+      render();
+    }) : null;
     var offMode = V.viewMode ? V.viewMode.onChange(render) : null;
     // v0.5.7 多源：源集合/隐私/k 变化 → 重建
     var offMulti = V.multisource ? V.multisource.onChange(function () {
