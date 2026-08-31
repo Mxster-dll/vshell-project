@@ -325,7 +325,7 @@
     box.appendChild(V.utils.el('button', {
       className: 'vshell-btn vshell-btn-primary',
       type: 'button',
-      style: 'margin-left:auto;margin-top:10px',
+      style: 'margin-left:auto;margin-top:20px',
       onclick: closeDlg,
     }, '完成'));
     overlay.appendChild(box);
