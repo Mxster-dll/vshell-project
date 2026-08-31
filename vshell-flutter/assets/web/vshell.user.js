@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = 'v61';
+window.VShell.version = 'v62';
 
 /* vshell 入口见 src/app.js */
 
@@ -14199,7 +14199,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         chipObj.chip = chip;
         bar.appendChild(chip);
       });
-      page.appendChild(bar);
+      // v0.6.3：成员条插到 page **顶部**（contentBox 之前）——此前 appendChild
+      // 使其落到详情内容之后（页面底部 ~2000px），用户看不到换源按钮
+      page.insertBefore(bar, contentBox);
       // v0.6.2 解除聚合：拆出当前播放成员（组>1 时显示；src/id 为闭包当前成员）
       if (grpObj.members.length > 1) {
         var tools = V.utils.el('div', { className: 'vshell-group-tools' }, [
@@ -14215,7 +14217,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
             },
           }, '解除聚合'),
         ]);
-        page.appendChild(tools);
+        page.insertBefore(tools, contentBox);   // v0.6.3：随成员条置顶
       }
       V.__groupChips = chips;
     }

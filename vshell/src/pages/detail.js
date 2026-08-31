@@ -218,7 +218,9 @@
         chipObj.chip = chip;
         bar.appendChild(chip);
       });
-      page.appendChild(bar);
+      // v0.6.3：成员条插到 page **顶部**（contentBox 之前）——此前 appendChild
+      // 使其落到详情内容之后（页面底部 ~2000px），用户看不到换源按钮
+      page.insertBefore(bar, contentBox);
       // v0.6.2 解除聚合：拆出当前播放成员（组>1 时显示；src/id 为闭包当前成员）
       if (grpObj.members.length > 1) {
         var tools = V.utils.el('div', { className: 'vshell-group-tools' }, [
@@ -234,7 +236,7 @@
             },
           }, '解除聚合'),
         ]);
-        page.appendChild(tools);
+        page.insertBefore(tools, contentBox);   // v0.6.3：随成员条置顶
       }
       V.__groupChips = chips;
     }
