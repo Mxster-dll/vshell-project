@@ -114,11 +114,33 @@
     // 保险：setAttribute('muted','') 后 property 在部分环境（headless 实测）为 false——
     // 显式赋值保证初始静音预览（用户取消静音后由 toggleMute 驱动）
     video.muted = true;
+    // 通用封面兜底（v0.6.5 提升到解密分支外）：解密失败（auth_key 过期/域名
+    // 失效 403）→ 详情接口刷新 pic（新 auth_key）；仍失败 → 渐变占位不黑。
+    function refreshCover() {
+      var ad;
+      try { ad = V.siteAdapters.adapterFor(item.sourceId); } catch (e) { ad = null; }
+      if (!ad || typeof ad.getVideoDetail !== 'function') { showCoverPlaceholder(); return; }
+      ad.getVideoDetail(item.id).then(function (d) {
+        if (d && d.pic && d.pic !== _raw) {
+          video.poster = d.pic;   // 17c 详情 pic 为解密后 blob
+          if (d.pic.indexOf('blob:') === 0) return;
+        }
+        showCoverPlaceholder();
+      }).catch(showCoverPlaceholder);
+    }
+    function showCoverPlaceholder() {
+      if (card.classList.contains('is-local-nocover')) return;
+      card.classList.add('is-local-nocover');
+      if (!placeholder) {
+        placeholder = V.utils.el('span', { className: 'vsc-video-placeholder' },
+          V.utils.el('span', { className: 'codicon codicon-file-media' }));
+        media.appendChild(placeholder);
+      }
+    }
     // v0.6.0 加密封面懒解密：源注册了解密器（pic 是加密 URL，blob 不可持久化）
     // → poster 先空，异步解密后回填。否则缓存加载的 blob URL 重启失效 → 封面黑。
-    // v0.5.10：解密失败（缓存 URL 的 auth_key 过期/域名失效 → 403）→ 先尝试
-    // 用详情接口刷新 pic（新 auth_key），仍失败 → 渐变占位（不显示黑封面）。
-    if (item.pic && item.sourceId && V.siteAdapters && V.siteAdapters.picDecryptorFor) {
+    // v0.6.5 组卡（item._grp）不走此分支：组封面统一走 picUrlOf（见下）。
+    if (!item._grp && item.pic && item.sourceId && V.siteAdapters && V.siteAdapters.picDecryptorFor) {
       var _dec = V.siteAdapters.picDecryptorFor(item.sourceId);
       if (_dec) {
         var _raw = item.pic;
@@ -128,28 +150,20 @@
           if (u) video.poster = u;
           else refreshCover();
         }).catch(refreshCover);
-        function refreshCover() {
-          var ad;
-          try { ad = V.siteAdapters.adapterFor(item.sourceId); } catch (e) { ad = null; }
-          if (!ad || typeof ad.getVideoDetail !== 'function') { showCoverPlaceholder(); return; }
-          ad.getVideoDetail(item.id).then(function (d) {
-            if (d && d.pic && d.pic !== _raw) {
-              video.poster = d.pic;   // 17c 详情 pic 为解密后 blob
-              if (d.pic.indexOf('blob:') === 0) return;
-            }
-            showCoverPlaceholder();
-          }).catch(showCoverPlaceholder);
-        }
-        function showCoverPlaceholder() {
-          if (card.classList.contains('is-local-nocover')) return;
-          card.classList.add('is-local-nocover');
-          if (!placeholder) {
-            placeholder = V.utils.el('span', { className: 'vsc-video-placeholder' },
-              V.utils.el('span', { className: 'codicon codicon-file-media' }));
-            media.appendChild(placeholder);
-          }
-        }
       }
+    }
+    // v0.6.5 组卡封面：grp.cover 可能是相对路径（kkav 需拼 baseUrl）或密文
+    // URL（17c 需 XOR 解密）——统一走 aggregations.picUrlOf 解析（resolvePicUrl
+    // 自动解密 + wallBaseUrl 拼域名）；失败 → 渐变占位不黑（组 id 不能直接
+    // getVideoDetail，不做 refreshCover 兜底）。
+    if (item._grp && item.pic && V.aggregations && V.aggregations.picUrlOf) {
+      var _raw = item.pic;
+      video.removeAttribute('poster');
+      video.poster = '';
+      V.aggregations.picUrlOf(item.sourceId, { pic: _raw }).then(function (u) {
+        if (u) video.poster = u;
+        else showCoverPlaceholder();
+      }).catch(showCoverPlaceholder);
     }
     // v0.5.6 第二十三轮：**无封面占位**——本地视频无任何封面图（截帧未
     // 完成/失败）时卡片不显示纯黑：media 上盖渐变+文件 icon 占位层（悬停

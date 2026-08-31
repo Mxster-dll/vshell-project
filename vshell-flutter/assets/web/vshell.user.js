@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.4
+// @version      0.6.5
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.4';
+window.VShell.version = '0.6.5';
 
 /* vshell 入口见 src/app.js */
 
@@ -6991,11 +6991,33 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     // 保险：setAttribute('muted','') 后 property 在部分环境（headless 实测）为 false——
     // 显式赋值保证初始静音预览（用户取消静音后由 toggleMute 驱动）
     video.muted = true;
+    // 通用封面兜底（v0.6.5 提升到解密分支外）：解密失败（auth_key 过期/域名
+    // 失效 403）→ 详情接口刷新 pic（新 auth_key）；仍失败 → 渐变占位不黑。
+    function refreshCover() {
+      var ad;
+      try { ad = V.siteAdapters.adapterFor(item.sourceId); } catch (e) { ad = null; }
+      if (!ad || typeof ad.getVideoDetail !== 'function') { showCoverPlaceholder(); return; }
+      ad.getVideoDetail(item.id).then(function (d) {
+        if (d && d.pic && d.pic !== _raw) {
+          video.poster = d.pic;   // 17c 详情 pic 为解密后 blob
+          if (d.pic.indexOf('blob:') === 0) return;
+        }
+        showCoverPlaceholder();
+      }).catch(showCoverPlaceholder);
+    }
+    function showCoverPlaceholder() {
+      if (card.classList.contains('is-local-nocover')) return;
+      card.classList.add('is-local-nocover');
+      if (!placeholder) {
+        placeholder = V.utils.el('span', { className: 'vsc-video-placeholder' },
+          V.utils.el('span', { className: 'codicon codicon-file-media' }));
+        media.appendChild(placeholder);
+      }
+    }
     // v0.6.0 加密封面懒解密：源注册了解密器（pic 是加密 URL，blob 不可持久化）
     // → poster 先空，异步解密后回填。否则缓存加载的 blob URL 重启失效 → 封面黑。
-    // v0.5.10：解密失败（缓存 URL 的 auth_key 过期/域名失效 → 403）→ 先尝试
-    // 用详情接口刷新 pic（新 auth_key），仍失败 → 渐变占位（不显示黑封面）。
-    if (item.pic && item.sourceId && V.siteAdapters && V.siteAdapters.picDecryptorFor) {
+    // v0.6.5 组卡（item._grp）不走此分支：组封面统一走 picUrlOf（见下）。
+    if (!item._grp && item.pic && item.sourceId && V.siteAdapters && V.siteAdapters.picDecryptorFor) {
       var _dec = V.siteAdapters.picDecryptorFor(item.sourceId);
       if (_dec) {
         var _raw = item.pic;
@@ -7005,28 +7027,20 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           if (u) video.poster = u;
           else refreshCover();
         }).catch(refreshCover);
-        function refreshCover() {
-          var ad;
-          try { ad = V.siteAdapters.adapterFor(item.sourceId); } catch (e) { ad = null; }
-          if (!ad || typeof ad.getVideoDetail !== 'function') { showCoverPlaceholder(); return; }
-          ad.getVideoDetail(item.id).then(function (d) {
-            if (d && d.pic && d.pic !== _raw) {
-              video.poster = d.pic;   // 17c 详情 pic 为解密后 blob
-              if (d.pic.indexOf('blob:') === 0) return;
-            }
-            showCoverPlaceholder();
-          }).catch(showCoverPlaceholder);
-        }
-        function showCoverPlaceholder() {
-          if (card.classList.contains('is-local-nocover')) return;
-          card.classList.add('is-local-nocover');
-          if (!placeholder) {
-            placeholder = V.utils.el('span', { className: 'vsc-video-placeholder' },
-              V.utils.el('span', { className: 'codicon codicon-file-media' }));
-            media.appendChild(placeholder);
-          }
-        }
       }
+    }
+    // v0.6.5 组卡封面：grp.cover 可能是相对路径（kkav 需拼 baseUrl）或密文
+    // URL（17c 需 XOR 解密）——统一走 aggregations.picUrlOf 解析（resolvePicUrl
+    // 自动解密 + wallBaseUrl 拼域名）；失败 → 渐变占位不黑（组 id 不能直接
+    // getVideoDetail，不做 refreshCover 兜底）。
+    if (item._grp && item.pic && V.aggregations && V.aggregations.picUrlOf) {
+      var _raw = item.pic;
+      video.removeAttribute('poster');
+      video.poster = '';
+      V.aggregations.picUrlOf(item.sourceId, { pic: _raw }).then(function (u) {
+        if (u) video.poster = u;
+        else showCoverPlaceholder();
+      }).catch(showCoverPlaceholder);
     }
     // v0.5.6 第二十三轮：**无封面占位**——本地视频无任何封面图（截帧未
     // 完成/失败）时卡片不显示纯黑：media 上盖渐变+文件 icon 占位层（悬停
