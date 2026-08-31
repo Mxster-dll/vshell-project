@@ -220,11 +220,48 @@
         ]),
         // 2. 信息条：卡片播放量/弹幕/日期（或骨架条）
         V.utils.el('div', { className: 'vshell-detail-stats' }, statsBody),
-        // 3. UP/角色行：头像圆 + 角色名条
-        V.utils.el('div', { className: 'vshell-detail-up' }, [
-          V.utils.el('span', { className: 'vshell-skeleton-circle' }),
-          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '96px' } }),
-        ]),
+        // 3. UP/角色行：v0.6.22 先用卡片角色信息（角色头像+名字/冲突红字），
+        //    无角色信息才回落骨架（圆+条）；加载完成后由 renderUpRow 替换
+        (function () {
+          var upBody;
+          var snapChar = snap && (snap.char || snap.charConflict);
+          if (snapChar) {
+            var upAvatarEl = V.utils.el('span', {
+              className: 'vshell-detail-up-avatar' + (snap.charConflict ? ' is-conflict' : ''),
+            });
+            if (snap.char) {
+              var setLetter3 = function () {
+                upAvatarEl.innerHTML = '';
+                upAvatarEl.appendChild(V.utils.el('span', {
+                  className: 'vshell-detail-up-avatar-letter',
+                }, String(snap.char.name).charAt(0) || '?'));
+              };
+              if (snap.char.icon) {
+                upAvatarEl.appendChild(V.utils.el('img', {
+                  src: snap.char.icon, alt: '', onerror: setLetter3,
+                }));
+              } else {
+                setLetter3();
+              }
+            } else {
+              upAvatarEl.appendChild(V.utils.el('span', {
+                className: 'codicon codicon-circle-slash',
+              }));
+            }
+            upBody = [
+              upAvatarEl,
+              V.utils.el('span', {
+                className: 'vshell-detail-up-name' + (snap.charConflict ? ' is-conflict' : ''),
+              }, snap.char ? snap.char.name : '角色冲突'),
+            ];
+          } else {
+            upBody = [
+              V.utils.el('span', { className: 'vshell-skeleton-circle' }),
+              V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '96px' } }),
+            ];
+          }
+          return V.utils.el('div', { className: 'vshell-detail-up' }, upBody);
+        })(),
         // 4. 播放卡片：封面图（快照）或 16:9 大块（骨架）
         V.utils.el('div', { className: 'vshell-detail-player-card' }, [playerBody]),
       ]);

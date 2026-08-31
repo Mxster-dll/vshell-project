@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.21
+// @version      0.6.22
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.21';
+window.VShell.version = '0.6.22';
 
 /* vshell 入口见 src/app.js */
 
@@ -7549,6 +7549,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     card.addEventListener('click', function (e) {
       var a = e.target && e.target.closest ? e.target.closest('a[href^="#/video/"]') : null;
       if (!a) return;
+      // v0.6.22：快照带卡片角色信息（charFor 同一匹配逻辑）——详情页 UP 行
+      // 加载中先显示卡片上显示的角色（加载完成后由详情数据替换）
+      var cres3 = (charsMod && charsMod.charFor)
+        ? charsMod.charFor(item.id, item) : { kind: 'none' };
       window.__VS_LAST_CARD__ = {
         src: item.sourceId || '',
         id: item.id,
@@ -7557,6 +7561,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         view: item.stat && item.stat.view,
         danmaku: item.stat && item.stat.danmaku,
         pubdate: item.pubdate || 0,
+        char: cres3.kind === 'char'
+          ? { name: cres3.char.name, icon: cres3.char.icon || '' } : null,
+        charConflict: cres3.kind === 'conflict' ? cres3.chars : null,
       };
     }, true);
     if (V.aggUi) {
@@ -14487,11 +14494,48 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         ]),
         // 2. 信息条：卡片播放量/弹幕/日期（或骨架条）
         V.utils.el('div', { className: 'vshell-detail-stats' }, statsBody),
-        // 3. UP/角色行：头像圆 + 角色名条
-        V.utils.el('div', { className: 'vshell-detail-up' }, [
-          V.utils.el('span', { className: 'vshell-skeleton-circle' }),
-          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '96px' } }),
-        ]),
+        // 3. UP/角色行：v0.6.22 先用卡片角色信息（角色头像+名字/冲突红字），
+        //    无角色信息才回落骨架（圆+条）；加载完成后由 renderUpRow 替换
+        (function () {
+          var upBody;
+          var snapChar = snap && (snap.char || snap.charConflict);
+          if (snapChar) {
+            var upAvatarEl = V.utils.el('span', {
+              className: 'vshell-detail-up-avatar' + (snap.charConflict ? ' is-conflict' : ''),
+            });
+            if (snap.char) {
+              var setLetter3 = function () {
+                upAvatarEl.innerHTML = '';
+                upAvatarEl.appendChild(V.utils.el('span', {
+                  className: 'vshell-detail-up-avatar-letter',
+                }, String(snap.char.name).charAt(0) || '?'));
+              };
+              if (snap.char.icon) {
+                upAvatarEl.appendChild(V.utils.el('img', {
+                  src: snap.char.icon, alt: '', onerror: setLetter3,
+                }));
+              } else {
+                setLetter3();
+              }
+            } else {
+              upAvatarEl.appendChild(V.utils.el('span', {
+                className: 'codicon codicon-circle-slash',
+              }));
+            }
+            upBody = [
+              upAvatarEl,
+              V.utils.el('span', {
+                className: 'vshell-detail-up-name' + (snap.charConflict ? ' is-conflict' : ''),
+              }, snap.char ? snap.char.name : '角色冲突'),
+            ];
+          } else {
+            upBody = [
+              V.utils.el('span', { className: 'vshell-skeleton-circle' }),
+              V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '96px' } }),
+            ];
+          }
+          return V.utils.el('div', { className: 'vshell-detail-up' }, upBody);
+        })(),
         // 4. 播放卡片：封面图（快照）或 16:9 大块（骨架）
         V.utils.el('div', { className: 'vshell-detail-player-card' }, [playerBody]),
       ]);

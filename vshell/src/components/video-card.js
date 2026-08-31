@@ -667,6 +667,10 @@
     card.addEventListener('click', function (e) {
       var a = e.target && e.target.closest ? e.target.closest('a[href^="#/video/"]') : null;
       if (!a) return;
+      // v0.6.22：快照带卡片角色信息（charFor 同一匹配逻辑）——详情页 UP 行
+      // 加载中先显示卡片上显示的角色（加载完成后由详情数据替换）
+      var cres3 = (charsMod && charsMod.charFor)
+        ? charsMod.charFor(item.id, item) : { kind: 'none' };
       window.__VS_LAST_CARD__ = {
         src: item.sourceId || '',
         id: item.id,
@@ -675,6 +679,9 @@
         view: item.stat && item.stat.view,
         danmaku: item.stat && item.stat.danmaku,
         pubdate: item.pubdate || 0,
+        char: cres3.kind === 'char'
+          ? { name: cres3.char.name, icon: cres3.char.icon || '' } : null,
+        charConflict: cres3.kind === 'conflict' ? cres3.chars : null,
       };
     }, true);
     if (V.aggUi) {
