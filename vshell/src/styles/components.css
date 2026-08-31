@@ -3633,7 +3633,8 @@
   z-index: 5;
 }
 .vsc-video-card.is-multi-selecting::before {
-  content: '\2713';
+  content: '\eab2';          /* codicon-check（与关注角色后的对勾同款图标） */
+  font-family: 'codicon';
   position: absolute;
   top: 6px;
   left: 6px;
@@ -3643,7 +3644,6 @@
   text-align: center;
   color: #ffffff;
   font-size: 12px;
-  font-weight: 600;
   z-index: 6;
 }
 /* 多选底部浮条 */
