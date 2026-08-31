@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = 'v56';
+window.VShell.version = 'v58';
 
 /* vshell 入口见 src/app.js */
 
@@ -7582,11 +7582,93 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (ok) V.toast.ok(msg); else V.toast.info(msg);
   }
 
-  /** 操作完成后刷新当前页（router.nav 同 hash → emit 重触发渲染） */
+  /** 操作完成后刷新当前页（router.nav 同 hash → emit 重触发渲染）。
+   *  v0.6.2 二期：组操作不再整页重渲染（用户反馈：添加组后页面跳动/滚动丢失），
+   *  改由 refreshAfterGroupOp / refreshAfterMerge 局部替换卡片。此函数仅保留
+   *  给确实需要全量重挂载的场景。 */
   function refresh() {
     closeMenu();
     exitMultiSelect();
     try { V.router.nav(location.hash); } catch (e) { /* noop */ }
+  }
+
+  /** 把单张卡原地替换为组卡（不重渲染页面，保持滚动位置） */
+  function replaceWithGroup(card, gid) {
+    if (!card || !card.parentNode || !V.aggregations) return;
+    var g = V.aggregations.getGroup(gid);
+    if (!g) return;
+    var opts = {
+      layout: V.wall ? V.wall.layout() : 'standard',
+      blacklistMode: !!(card.closest && card.closest('.vshell-blacklist-page')),
+    };
+    var gitem = {
+      id: g.id,
+      title: g.title || '',
+      pic: g.cover || '',
+      cover: g.cover || '',
+      sourceId: g.coverSrc || null,
+      _grp: true,
+    };
+    var nc;
+    try { nc = V.videoCard.create(gitem, opts); } catch (e) { return; }
+    var idx = card.style.getPropertyValue('--i');
+    if (idx) nc.style.setProperty('--i', idx);   // 继承入场动画序号（防动画重排）
+    card.parentNode.replaceChild(nc, card);
+  }
+
+  /** 组操作后局部更新当前页墙：
+   *  该组成员仍是单卡的 → 替换为组卡（页面已有同组组卡则直接删除单卡）；
+   *  不触碰其他卡片，不重渲染，滚动位置保持 */
+  function refreshAfterGroupOp(gid) {
+    if (!V.aggregations) return;
+    var g = V.aggregations.getGroup(gid);
+    if (!g) return;
+    var members = {};
+    (g.members || []).forEach(function (m) { members[m.src + ':' + m.id] = true; });
+    var cards = document.querySelectorAll('.vsc-video-card');
+    function pageHasGrpCard() {
+      var has = false;
+      document.querySelectorAll('.vsc-video-card').forEach(function (x) {
+        var xi = x.__item;
+        if (xi && xi._grp && String(xi.id) === String(gid)) has = true;
+      });
+      return has;
+    }
+    var remove = [];
+    for (var j = 0; j < cards.length; j++) {
+      var c = cards[j];
+      var it = c.__orig || c.__item;
+      if (!it || !it.id) continue;
+      if (it._grp || /^grp:/.test(it.id || '')) continue;
+      var src = it.sourceId || c.getAttribute('data-src') || '';
+      var isMember = !!members[src + ':' + it.id];
+      if (!isMember) {
+        // 无源快照卡（charVideos/featured 旧数据缺 sourceId）：按 id 宽松匹配
+        for (var k = 0; k < g.members.length; k++) {
+          if (String(g.members[k].id) === String(it.id)) { isMember = true; break; }
+        }
+      }
+      if (!isMember) continue;
+      if (pageHasGrpCard()) {
+        remove.push(c);                     // 已有组卡 → 删单卡（防重复组卡）
+      } else {
+        replaceWithGroup(c, gid);
+      }
+    }
+    remove.forEach(function (c) { if (c.parentNode) c.parentNode.removeChild(c); });
+  }
+
+  /** 合并后局部更新：gidKeep 保留、gidGone 消失——删除页面上 gidGone 的组卡
+   *  （若存在），再按 gidKeep 折叠成员单卡 */
+  function refreshAfterMerge(gidKeep, gidGone) {
+    if (!V.aggregations) return;
+    document.querySelectorAll('.vsc-video-card').forEach(function (c) {
+      var it = c.__item;
+      if (it && it._grp && String(it.id) === String(gidGone)) {
+        if (c.parentNode) c.parentNode.removeChild(c);
+      }
+    });
+    refreshAfterGroupOp(gidKeep);
   }
 
   /* ---------------- 右键菜单 ---------------- */
@@ -7713,7 +7795,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         coverSrc: m0.sourceId || m0.src,
         auto: false,
       });
-      if (gid) { toast('已创建组：' + (m0.title || ''), true); refresh(); }
+      if (gid) { toast('已创建组：' + (m0.title || ''), true); refreshAfterGroupOp(gid); }
       return;
     }
     // ≥2：弹窗选标题封面（默认质量优：有封面 > 标题长）
@@ -7765,7 +7847,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           auto: false,
         });
         dlg.close();
-        if (gid) { toast('已创建组：' + (cust.value.trim() || m.title || ''), true); refresh(); }
+        if (gid) { toast('已创建组：' + (cust.value.trim() || m.title || ''), true); refreshAfterGroupOp(gid); }
       }),
     ]);
   }
@@ -7817,7 +7899,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           coverSrc: g.coverSrc || '',
         });
         dlg.close();
-        if (ok) { toast('已合并组', true); refresh(); }
+        if (ok) { toast('已合并组', true); refreshAfterMerge(g1.id, g2.id); }
       }),
     ]);
   }
@@ -7853,7 +7935,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         mergeGroupsDlg(grps[0], g);
         return;
       }
-      if (ok) { toast('已并入组：' + (g.title || ''), true); refresh(); }
+      if (ok) { toast('已并入组：' + (g.title || ''), true); refreshAfterGroupOp(g.id); }
     }
     function render(q) {
       list.innerHTML = '';
@@ -7969,12 +8051,13 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     mk('新增为多组', 'vshell-btn', true, function (ms) {
       var n = 0;
       ms.forEach(function (m) {
-        if (V.aggregations.createGroup([{ src: m.src, id: m.id }], {
+        var gid = V.aggregations.createGroup([{ src: m.src, id: m.id }], {
           title: m.title || m.id, cover: m.pic || '',
           coverSrc: m.sourceId || m.src, auto: false,
-        })) n++;
+        });
+        if (gid) { n++; refreshAfterGroupOp(gid); }
       });
-      if (n) { toast('已创建 ' + n + ' 个组', true); refresh(); }
+      if (n) toast('已创建 ' + n + ' 个组', true);
     });
     mk('添加到组', 'vshell-btn', false, function (ms) { pickGroup(ms); });
     mk('取消', 'vshell-btn-secondary', false, function () { exitMultiSelect(); });
@@ -8098,7 +8181,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (V.aggregations.addToGroup(gid, { src: m.src, id: m.id })) {
       var g = V.aggregations.getGroup(gid);
       toast('已并入组：' + ((g && g.title) || ''), true);
-      refresh();
+      refreshAfterGroupOp(gid);
     } else {
       toast('该视频已在组中');
     }
@@ -8145,6 +8228,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     unmerge: unmerge,
     markPart: markPart,
     refresh: refresh,
+    refreshAfterGroupOp: refreshAfterGroupOp,   // v0.6.2：局部卡片更新（调试/外部）
+    refreshAfterMerge: refreshAfterMerge,
   };
 })();
 
