@@ -232,6 +232,40 @@
     catch (e) { return ''; }
   }
 
+  /** v0.6.24 清除**单个数据源**的全部缓存（用户需求：每个数据源一个清理
+   *  缓存按钮）：
+   *   - 墙缓存分片：vshell.wall.*.<srcId>（home/category/role/st 各墙）
+   *   - 搜索缓存：vshell.searchCache.<srcId> + 无前缀遗留 searchCache.<srcId>
+   *   - **不动用户数据键**（saved/watched/blacklist/characters/aggregations）
+   *     与每源 id 表（vshell.videos.<srcId>——grilling 拍板「id 表永不清理」，
+   *     懒写入重建）
+   *   localStorage + VsStore 桥双删；返回 {count, bytes} */
+  function clearSourceCache(srcId) {
+    if (!srcId) return { count: 0, bytes: 0 };
+    var n = 0, bytes = 0, br = window.__VS_STORE_BRIDGE__;
+    var suffix = '.' + srcId;
+    try {
+      for (var i = localStorage.length - 1; i >= 0; i--) {
+        var k = localStorage.key(i);
+        if (!k) continue;
+        var hit = false;
+        if (k.indexOf('vshell.wall.') === 0 && k.length > suffix.length
+          && k.indexOf(suffix) === k.length - suffix.length) {
+          hit = true;
+        } else if (k === 'vshell.searchCache.' + srcId || k === 'searchCache.' + srcId) {
+          hit = true;
+        }
+        if (!hit) continue;
+        var raw = localStorage.getItem(k) || '';
+        bytes += raw.length * 2;
+        localStorage.removeItem(k);
+        if (br && br.del) { try { br.del(k); } catch (e) { /* noop */ } }
+        n++;
+      }
+    } catch (e) { /* noop */ }
+    return { count: n, bytes: bytes };
+  }
+
   V.multisource = {
     activeSources: activeSources,
     activeKey: activeKey,             // v0.5.9：激活源集合串（缓存键维度）
@@ -249,5 +283,6 @@
     unionSet: unionSet,
     refreshRegistry: refreshRegistry,
     onChange: onChange,
+    clearSourceCache: clearSourceCache,   // v0.6.24：清单个源全部缓存
   };
 })();

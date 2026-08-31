@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.23
+// @version      0.6.24
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.23';
+window.VShell.version = '0.6.24';
 
 /* vshell 入口见 src/app.js */
 
@@ -4101,6 +4101,40 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     catch (e) { return ''; }
   }
 
+  /** v0.6.24 清除**单个数据源**的全部缓存（用户需求：每个数据源一个清理
+   *  缓存按钮）：
+   *   - 墙缓存分片：vshell.wall.*.<srcId>（home/category/role/st 各墙）
+   *   - 搜索缓存：vshell.searchCache.<srcId> + 无前缀遗留 searchCache.<srcId>
+   *   - **不动用户数据键**（saved/watched/blacklist/characters/aggregations）
+   *     与每源 id 表（vshell.videos.<srcId>——grilling 拍板「id 表永不清理」，
+   *     懒写入重建）
+   *   localStorage + VsStore 桥双删；返回 {count, bytes} */
+  function clearSourceCache(srcId) {
+    if (!srcId) return { count: 0, bytes: 0 };
+    var n = 0, bytes = 0, br = window.__VS_STORE_BRIDGE__;
+    var suffix = '.' + srcId;
+    try {
+      for (var i = localStorage.length - 1; i >= 0; i--) {
+        var k = localStorage.key(i);
+        if (!k) continue;
+        var hit = false;
+        if (k.indexOf('vshell.wall.') === 0 && k.length > suffix.length
+          && k.indexOf(suffix) === k.length - suffix.length) {
+          hit = true;
+        } else if (k === 'vshell.searchCache.' + srcId || k === 'searchCache.' + srcId) {
+          hit = true;
+        }
+        if (!hit) continue;
+        var raw = localStorage.getItem(k) || '';
+        bytes += raw.length * 2;
+        localStorage.removeItem(k);
+        if (br && br.del) { try { br.del(k); } catch (e) { /* noop */ } }
+        n++;
+      }
+    } catch (e) { /* noop */ }
+    return { count: n, bytes: bytes };
+  }
+
   V.multisource = {
     activeSources: activeSources,
     activeKey: activeKey,             // v0.5.9：激活源集合串（缓存键维度）
@@ -4118,6 +4152,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     unionSet: unionSet,
     refreshRegistry: refreshRegistry,
     onChange: onChange,
+    clearSourceCache: clearSourceCache,   // v0.6.24：清单个源全部缓存
   };
 })();
 
@@ -17824,6 +17859,47 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         }, V.utils.el('span', { className: 'codicon codicon-refresh' }));
         return b;
       }
+      /** v0.6.24 清理单源缓存按钮（用户需求）：清除该数据源的全部缓存
+       *  （墙分片 vshell.wall.*.<id> + 搜索缓存 vshell.searchCache.<id>/
+       *  searchCache.<id>）；**不动**用户数据键与 id 表（vshell.videos.<id>）。
+       *  二次确认（is-confirm 红态，同「清除缓存」全局按钮语义）→ 执行 →
+       *  toast → reload（缓存重建） */
+      function clearCacheBtn(id) {
+        var b = V.utils.el('button', {
+          className: 'vshell-settings-source-clear',
+          title: '清除该数据源的全部缓存（墙缓存+搜索缓存）',
+          'aria-label': '清除数据源缓存',
+          type: 'button',
+          onclick: function (e) {
+            e.stopPropagation();
+            if (!b.__confirming) {
+              b.__confirming = true;
+              b.classList.add('is-confirm');
+              b.title = '再次点击确认清除';
+              setTimeout(function () {
+                if (b.__confirming) {
+                  b.__confirming = false;
+                  b.classList.remove('is-confirm');
+                  b.title = '清除该数据源的全部缓存（墙缓存+搜索缓存）';
+                }
+              }, 3000);
+              return;
+            }
+            b.__confirming = false;
+            b.classList.remove('is-confirm');
+            var r = (V.multisource && V.multisource.clearSourceCache)
+              ? V.multisource.clearSourceCache(id) : { count: 0, bytes: 0 };
+            if (r.count > 0) {
+              V.toast.ok('已清除「' + id + '」' + r.count + ' 个缓存（约 '
+                + Math.round(r.bytes / 1024) + ' KB），正在刷新…');
+              setTimeout(function () { location.reload(); }, 350);
+            } else {
+              V.toast.info('「' + id + '」没有缓存需要清除');
+            }
+          },
+        }, V.utils.el('span', { className: 'codicon codicon-clear-all' }));
+        return b;
+      }
       function render() {
         wrap.innerHTML = '';
         // v0.5.10 独立化：**无内置数据源**——acfun/bilibili 也是插件，
@@ -17838,7 +17914,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         } catch (e) { /* noop */ }
         function makePluginRow(s) {
           return makeRow(s.id, s.name + '（插件）',
-            [privBtn(s.id), reloadBtn(s.id), delBtn(s.id)]);
+            [privBtn(s.id), reloadBtn(s.id), clearCacheBtn(s.id), delBtn(s.id)]);
         }
         function commitRows(rows) {
           // k 拖动条（顶部）→ 行 → 添加按钮
@@ -22489,6 +22565,30 @@ html.vshell::-webkit-scrollbar {
   color: var(--vscode-foreground);
 }
 .vshell-settings-source-reload .codicon { font-size: 12px; }
+/* v0.6.24 数据源清理缓存按钮：清除该源全部墙缓存+搜索缓存（二次确认红态） */
+.vshell-settings-source-clear {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 2px;
+  padding: 0;
+  transition: background 120ms ease, color 120ms ease;
+}
+.vshell-settings-source-clear:hover {
+  background: var(--vscode-toolbar-activeBackground);
+  color: var(--vscode-foreground);
+}
+.vshell-settings-source-clear.is-confirm {
+  color: var(--vscode-errorForeground);
+}
+.vshell-settings-source-clear .codicon { font-size: 12px; }
 .vshell-settings-source-add {
   display: inline-flex;
   align-items: center;

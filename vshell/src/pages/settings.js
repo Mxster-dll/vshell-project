@@ -298,6 +298,47 @@
         }, V.utils.el('span', { className: 'codicon codicon-refresh' }));
         return b;
       }
+      /** v0.6.24 清理单源缓存按钮（用户需求）：清除该数据源的全部缓存
+       *  （墙分片 vshell.wall.*.<id> + 搜索缓存 vshell.searchCache.<id>/
+       *  searchCache.<id>）；**不动**用户数据键与 id 表（vshell.videos.<id>）。
+       *  二次确认（is-confirm 红态，同「清除缓存」全局按钮语义）→ 执行 →
+       *  toast → reload（缓存重建） */
+      function clearCacheBtn(id) {
+        var b = V.utils.el('button', {
+          className: 'vshell-settings-source-clear',
+          title: '清除该数据源的全部缓存（墙缓存+搜索缓存）',
+          'aria-label': '清除数据源缓存',
+          type: 'button',
+          onclick: function (e) {
+            e.stopPropagation();
+            if (!b.__confirming) {
+              b.__confirming = true;
+              b.classList.add('is-confirm');
+              b.title = '再次点击确认清除';
+              setTimeout(function () {
+                if (b.__confirming) {
+                  b.__confirming = false;
+                  b.classList.remove('is-confirm');
+                  b.title = '清除该数据源的全部缓存（墙缓存+搜索缓存）';
+                }
+              }, 3000);
+              return;
+            }
+            b.__confirming = false;
+            b.classList.remove('is-confirm');
+            var r = (V.multisource && V.multisource.clearSourceCache)
+              ? V.multisource.clearSourceCache(id) : { count: 0, bytes: 0 };
+            if (r.count > 0) {
+              V.toast.ok('已清除「' + id + '」' + r.count + ' 个缓存（约 '
+                + Math.round(r.bytes / 1024) + ' KB），正在刷新…');
+              setTimeout(function () { location.reload(); }, 350);
+            } else {
+              V.toast.info('「' + id + '」没有缓存需要清除');
+            }
+          },
+        }, V.utils.el('span', { className: 'codicon codicon-clear-all' }));
+        return b;
+      }
       function render() {
         wrap.innerHTML = '';
         // v0.5.10 独立化：**无内置数据源**——acfun/bilibili 也是插件，
@@ -312,7 +353,7 @@
         } catch (e) { /* noop */ }
         function makePluginRow(s) {
           return makeRow(s.id, s.name + '（插件）',
-            [privBtn(s.id), reloadBtn(s.id), delBtn(s.id)]);
+            [privBtn(s.id), reloadBtn(s.id), clearCacheBtn(s.id), delBtn(s.id)]);
         }
         function commitRows(rows) {
           // k 拖动条（顶部）→ 行 → 添加按钮
