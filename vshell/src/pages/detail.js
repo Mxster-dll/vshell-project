@@ -129,6 +129,62 @@
       if (ak) main.appendChild(ak);
     }
 
+    /** v0.6.14：同构骨架——主区骨架与真实 renderMain 布局一致：
+     *  标题行（条+禁用复制钮）→ 信息条（播放/弹幕/日期/时长小块）→
+     *  UP 行（头像圆+名字条）→ 播放卡片（16:9 大块）；
+     *  操作行（真实静态）与简介骨架由 loadMember 在外部按序挂载 */
+    function skeletonMain() {
+      return V.utils.el('div', { className: 'vshell-detail-skeleton vshell-detail-skeleton-iso' }, [
+        // 1. 标题行：标题条 + 禁用的复制按钮（布局与真实一致）
+        V.utils.el('div', { className: 'vshell-detail-title-row' }, [
+          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '62%' } }),
+          V.utils.el('button', {
+            className: 'vshell-icon-btn vshell-detail-copy',
+            type: 'button', disabled: 'disabled',
+            title: '复制视频标题（加载中）', 'aria-label': '复制视频标题',
+          }, V.utils.el('span', { className: 'codicon codicon-copy' })),
+        ]),
+        // 2. 信息条：播放量/弹幕/日期/时长 小块（真实 stats flex gap 14px）
+        V.utils.el('div', { className: 'vshell-detail-stats' }, [
+          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '78px' } }),
+          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '54px' } }),
+          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '90px' } }),
+          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '46px' } }),
+        ]),
+        // 3. UP/角色行：头像圆 + 角色名条
+        V.utils.el('div', { className: 'vshell-detail-up' }, [
+          V.utils.el('span', { className: 'vshell-skeleton-circle' }),
+          V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '96px' } }),
+        ]),
+        // 4. 播放卡片：16:9 大块（视频卡形状）
+        V.utils.el('div', { className: 'vshell-detail-player-card' }, [
+          V.utils.el('div', { className: 'vshell-skeleton-block vshell-skeleton-player' }),
+        ]),
+      ]);
+    }
+    /** v0.6.14：简介骨架（操作行之后，与真实顺序一致） */
+    function skeletonDesc() {
+      return V.utils.el('div', { className: 'vshell-detail-desc-skeleton' }, [
+        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '100%' } }),
+        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '86%' } }),
+        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '64%' } }),
+      ]);
+    }
+    /** v0.6.14：相关推荐骨架（5 项：缩略图块 + 标题/元信息两行条，同真实列表） */
+    function skeletonSide() {
+      var items = [];
+      for (var i = 0; i < 5; i++) {
+        items.push(V.utils.el('li', null, [
+          V.utils.el('span', { className: 'vshell-detail-related-thumb' }),
+          V.utils.el('span', { className: 'vshell-detail-related-info' }, [
+            V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '92%' } }),
+            V.utils.el('span', { className: 'vshell-skeleton-line', style: { width: '55%', height: '12px' } }),
+          ]),
+        ]));
+      }
+      return V.utils.el('ul', { className: 'vshell-detail-related vshell-detail-related-skel' }, items);
+    }
+
     var currentTitle = '';
     var currentPic = '';
     var copyTimer = null;   // 复制按钮动画复位定时器
@@ -180,18 +236,11 @@
       // v0.6.12b：清空主区但保留操作行
       clearMain();
       side.innerHTML = '';
-      // 局部加载动画（骨架 pulse；主区播放器大块 + 行，侧栏行）——插到操作行前
-      main.insertBefore(V.utils.el('div', { className: 'vshell-detail-skeleton' }, [
-        V.utils.el('div', { className: 'vshell-skeleton-block vshell-skeleton-player' }),
-        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '60%' } }),
-        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '35%' } }),
-      ]), actionsRow);
-      side.appendChild(V.utils.el('div', { className: 'vshell-detail-skeleton' }, [
-        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '85%' } }),
-        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '70%' } }),
-        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '80%' } }),
-        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '65%' } }),
-      ]));
+      // v0.6.14：同构骨架——与真实详情布局一致（标题行/信息条/UP 行/视频卡/
+      // 简介/相关推荐项），各元素为加载动效占位；操作行/返回按钮为真实静态组件
+      main.insertBefore(skeletonMain(), actionsRow);
+      main.appendChild(skeletonDesc());      // 简介骨架：操作行之后（真实顺序一致）
+      side.appendChild(skeletonSide());
       // 源未启用：直接空态，不发起网络请求（避免网络失败提示掩盖未启用提示）
       var disMsg2 = srcDisabledMsg();
       if (disMsg2) {

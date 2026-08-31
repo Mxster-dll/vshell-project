@@ -2711,6 +2711,52 @@
   animation: vshell-pulse 1.3s ease-in-out infinite;
 }
 
+/* v0.6.14：同构骨架——与真实详情布局**一致**（标题行/信息条/UP 行/视频卡/
+   简介/相关推荐项），只是各元素为加载动效占位；操作行/返回按钮为真实静态组件 */
+.vshell-detail-skeleton-iso {
+  padding: 0;
+}
+/* 标题行骨架：条 + 禁用的复制按钮（布局与真实标题行一致） */
+.vshell-detail-title-row .vshell-skeleton-line {
+  display: inline-block;
+  height: 24px;
+  vertical-align: middle;
+}
+.vshell-detail-title-row .vshell-detail-copy[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+/* 信息条骨架：小块横排（真实 stats flex gap 14px） */
+.vshell-detail-stats .vshell-skeleton-line,
+.vshell-detail-up .vshell-skeleton-line {
+  display: inline-block;
+  vertical-align: middle;
+}
+/* UP 行骨架：头像圆（38px 同真实 .vshell-detail-up-avatar） */
+.vshell-skeleton-circle {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--vscode-list-hoverBackground);
+  animation: vshell-pulse 1.3s ease-in-out infinite;
+  flex: none;
+}
+/* 简介骨架（操作行之后，与真实顺序一致） */
+.vshell-detail-desc-skeleton {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+/* 相关推荐骨架：缩略图块（168px 16/9 同真实 thumb）+ 标题/元信息两行条 */
+.vshell-detail-related-skel .vshell-detail-related-thumb {
+  background: var(--vscode-list-hoverBackground);
+  animation: vshell-pulse 1.3s ease-in-out infinite;
+}
+.vshell-detail-related-skel .vshell-detail-related-info .vshell-skeleton-line {
+  display: block;
+}
+
 /* ================= 角色系统（v0.5.0，标签升级） ================= */
 
 /* ---- 角色管理面板：VS Code Modern 两栏（用户拍板方案 B，v0.5.2） ----
