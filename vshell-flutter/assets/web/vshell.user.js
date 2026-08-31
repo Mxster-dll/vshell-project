@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.42
+// @version      0.6.43
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.42';
+window.VShell.version = '0.6.43';
 
 /* vshell 入口见 src/app.js */
 
@@ -17288,6 +17288,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     // 的聚合卡（按取卡顺序）；localItems = 本地视频命中关键词（置顶）。
     var agg = { feeds: {}, items: [], localItems: [], hasMore: true, loading: false,
       failed: false, srcRotate: 0, firstRound: true, issued: {} };
+    // v0.6.43：代表作排重建指纹——characters.onChange 无条件调 renderMarquee，
+    // 删除关键词/排除词等**无关变更**也会整排重建（innerHTML='' + 重建 mq →
+    // 滚动动画重置闪动）。指纹不变时跳过重建。
+    var mqFpLast = '';
     var manualCount = V.characters.videosOf(role.name).length;
     // v0.5.6 第五轮：聚合按角色的**所有关键词**搜索；关键词被删光时兜底角色名
     function aggKws() {
@@ -17340,8 +17344,13 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       // fm 提前计算并合并进 videos，再判空。
       // v0.5.6 第二十轮需求 4：**多个代表作**——所有代表作快照（featuredMetas
       // 优先，缺失时从 videosOf 按 id 找）置顶，其余去重
-      var fds = Array.isArray(role.featured) ? role.featured.slice() : (role.featured ? [role.featured] : []);
-      var fms = (role.featuredMetas && typeof role.featuredMetas === 'object') ? role.featuredMetas : {};
+      // v0.6.43：role 是 mount 快照——代表作数据实时重读（角色页内星标
+      // 设/取消代表作后 notify→renderMarquee 需反映最新，快照读不到）
+      var liveRole = mergedRole(role.name) || role;
+      var fds = Array.isArray(liveRole.featured) ? liveRole.featured.slice()
+        : (liveRole.featured ? [liveRole.featured] : []);
+      var fms = (liveRole.featuredMetas && typeof liveRole.featuredMetas === 'object')
+        ? liveRole.featuredMetas : {};
       var fmVideos = [];
       fds.forEach(function (fid) {
         if (!fid) return;
@@ -17361,6 +17370,13 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       // manual 置顶段）。原代码 `fmVideos.concat(videos)` 把手动添加的
       // 全部视频也塞进代表作排，与「代表作」语义冲突。
       videos = fmVideos;
+      // v0.6.43：重建前指纹比对——输出只由 fds/fms/fmVideos 决定；删除
+      // 关键词/排除词、手动列表变化等无关变更触发 onChange→renderMarquee
+      // 时数据未变 → 跳过重建（防滚动动画重置闪动）
+      var mqFp = (fds || []).join(',') + '|' + JSON.stringify(fms || {}) + '|'
+        + (fmVideos || []).map(function (v) { return v && v.id; }).join(',');
+      if (mqFp === mqFpLast) return;
+      mqFpLast = mqFp;
       if (!videos.length) {
         // v0.5.6 第十七轮需求 2 根因（实测 mqRightAfter children=0）：
         // 取消代表作时 onclick 内 setFeatured → persist() → notify() →

@@ -154,6 +154,10 @@
     // 的聚合卡（按取卡顺序）；localItems = 本地视频命中关键词（置顶）。
     var agg = { feeds: {}, items: [], localItems: [], hasMore: true, loading: false,
       failed: false, srcRotate: 0, firstRound: true, issued: {} };
+    // v0.6.43：代表作排重建指纹——characters.onChange 无条件调 renderMarquee，
+    // 删除关键词/排除词等**无关变更**也会整排重建（innerHTML='' + 重建 mq →
+    // 滚动动画重置闪动）。指纹不变时跳过重建。
+    var mqFpLast = '';
     var manualCount = V.characters.videosOf(role.name).length;
     // v0.5.6 第五轮：聚合按角色的**所有关键词**搜索；关键词被删光时兜底角色名
     function aggKws() {
@@ -206,8 +210,13 @@
       // fm 提前计算并合并进 videos，再判空。
       // v0.5.6 第二十轮需求 4：**多个代表作**——所有代表作快照（featuredMetas
       // 优先，缺失时从 videosOf 按 id 找）置顶，其余去重
-      var fds = Array.isArray(role.featured) ? role.featured.slice() : (role.featured ? [role.featured] : []);
-      var fms = (role.featuredMetas && typeof role.featuredMetas === 'object') ? role.featuredMetas : {};
+      // v0.6.43：role 是 mount 快照——代表作数据实时重读（角色页内星标
+      // 设/取消代表作后 notify→renderMarquee 需反映最新，快照读不到）
+      var liveRole = mergedRole(role.name) || role;
+      var fds = Array.isArray(liveRole.featured) ? liveRole.featured.slice()
+        : (liveRole.featured ? [liveRole.featured] : []);
+      var fms = (liveRole.featuredMetas && typeof liveRole.featuredMetas === 'object')
+        ? liveRole.featuredMetas : {};
       var fmVideos = [];
       fds.forEach(function (fid) {
         if (!fid) return;
@@ -227,6 +236,13 @@
       // manual 置顶段）。原代码 `fmVideos.concat(videos)` 把手动添加的
       // 全部视频也塞进代表作排，与「代表作」语义冲突。
       videos = fmVideos;
+      // v0.6.43：重建前指纹比对——输出只由 fds/fms/fmVideos 决定；删除
+      // 关键词/排除词、手动列表变化等无关变更触发 onChange→renderMarquee
+      // 时数据未变 → 跳过重建（防滚动动画重置闪动）
+      var mqFp = (fds || []).join(',') + '|' + JSON.stringify(fms || {}) + '|'
+        + (fmVideos || []).map(function (v) { return v && v.id; }).join(',');
+      if (mqFp === mqFpLast) return;
+      mqFpLast = mqFp;
       if (!videos.length) {
         // v0.5.6 第十七轮需求 2 根因（实测 mqRightAfter children=0）：
         // 取消代表作时 onclick 内 setFeatured → persist() → notify() →
