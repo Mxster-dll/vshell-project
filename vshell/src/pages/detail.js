@@ -129,18 +129,24 @@
       if (ak) main.appendChild(ak);
     }
 
-    // v0.6.15：来源卡片快照（video-card 点击详情链接前写入）——详情加载中
-    // 标题/封面先用卡片值占位，加载完成后由详情数据替换
-    var cardSnap = window.__VS_LAST_CARD__ || null;
-    /** 快照匹配：普通（源,id）一致；组卡（id 含 grp: 前缀）按组 id 匹配 */
-    function snapFor(mSrc, mId) {
-      if (!cardSnap) return null;
-      var sid = String(cardSnap.id || '');
-      if (sid.indexOf('grp:') === 0) {
-        return (isGroup && gid === sid) ? cardSnap : null;
+    // v0.6.23：详情加载中占位统一读**每源视频 id 表**（V.videoTable）——
+    // 表由 feed 拉取/卡片渲染时写入（预览首写）+ 详情加载覆盖（touchDetail），
+    // 与视频卡片共一个本地源；读限启用源（未启用源 → null → 骨架）。
+    // 组详情（grp:）不落表 → 占位回退骨架。
+    function tableSnap(mSrc, mId) {
+      if (!V.videoTable || !V.videoTable.queryDetail) return null;
+      if (isGroup) return null;
+      var s = null;
+      try { s = V.videoTable.queryDetail(mSrc, mId); } catch (e) { return null; }
+      if (!s) return null;
+      // 表存相对化 pic（feed 持久化形态）——拼当前 baseUrl（17c 等加密源
+      // 保持密文原样，由 skeletonMain 异步 picUrlOf 解密）
+      if (s.pic && s.pic.charAt(0) === '/') {
+        var b = (V.aggregations && V.aggregations.wallBaseUrl)
+          ? V.aggregations.wallBaseUrl(mSrc) : '';
+        if (b) s.pic = b + s.pic;
       }
-      if (cardSnap.src === mSrc && sid === String(mId)) return cardSnap;
-      return null;
+      return s;
     }
 
     /** v0.6.19：详情加载后把最新播放/弹幕数回写各墙缓存分片——卡片=列表
@@ -179,7 +185,7 @@
      *  v0.6.15/18：snap 为来源卡片快照——标题/封面/播放量行（播放/弹幕/
      *  日期）先显示卡片真实值（无快照/无值则回落骨架占位）；
      *  加载完成后 renderMain 整体替换为详情数据 */
-    function skeletonMain(snap) {
+    function skeletonMain(snap, mSrc, mId) {
       snap = snap || null;
       var titleEl = (snap && snap.title)
         ? V.utils.el('h1', { className: 'vshell-detail-title' }, snap.title)
@@ -189,6 +195,17 @@
             className: 'vshell-detail-poster-skel', src: snap.pic, alt: '',
           })
         : V.utils.el('div', { className: 'vshell-skeleton-block vshell-skeleton-player' });
+      // v0.6.23：加密图源（17c）占位封面异步解密（picUrlOf 拼 baseUrl+解密）
+      if (snap && snap.pic && mSrc && V.aggregations && V.aggregations.picUrlOf
+        && V.siteAdapters && V.siteAdapters.picDecryptorFor
+        && V.siteAdapters.picDecryptorFor(mSrc)) {
+        var imgEl = playerBody.tagName === 'IMG' ? playerBody : null;
+        if (imgEl) {
+          V.aggregations.picUrlOf(mSrc, { pic: snap.pic }).then(function (u) {
+            if (u && imgEl.isConnected) imgEl.src = u;
+          }).catch(function () { /* 保持原样 */ });
+        }
+      }
       // v0.6.18：信息条先显示卡片播放量/弹幕/日期（无快照值 → 骨架条）
       var statsBody;
       if (snap && (snap.view || snap.danmaku || snap.pubdate)) {
@@ -221,24 +238,30 @@
         // 2. 信息条：卡片播放量/弹幕/日期（或骨架条）
         V.utils.el('div', { className: 'vshell-detail-stats' }, statsBody),
         // 3. UP/角色行：v0.6.22 先用卡片角色信息（角色头像+名字/冲突红字），
+        //    v0.6.23 角色从表标题实时 charFor 匹配（与卡片同一匹配逻辑，快照退役）；
         //    无角色信息才回落骨架（圆+条）；加载完成后由 renderUpRow 替换
         (function () {
           var upBody;
-          var snapChar = snap && (snap.char || snap.charConflict);
-          if (snapChar) {
+          var snapChar = null, snapConflict = null;
+          if (snap && snap.title && V.characters && V.characters.charFor) {
+            var cres3 = V.characters.charFor(mId, { id: mId, title: snap.title, sourceId: mSrc });
+            if (cres3.kind === 'char') snapChar = { name: cres3.char.name, icon: cres3.char.icon || '' };
+            else if (cres3.kind === 'conflict') snapConflict = cres3.chars;
+          }
+          if (snapChar || snapConflict) {
             var upAvatarEl = V.utils.el('span', {
-              className: 'vshell-detail-up-avatar' + (snap.charConflict ? ' is-conflict' : ''),
+              className: 'vshell-detail-up-avatar' + (snapConflict ? ' is-conflict' : ''),
             });
-            if (snap.char) {
+            if (snapChar) {
               var setLetter3 = function () {
                 upAvatarEl.innerHTML = '';
                 upAvatarEl.appendChild(V.utils.el('span', {
                   className: 'vshell-detail-up-avatar-letter',
-                }, String(snap.char.name).charAt(0) || '?'));
+                }, String(snapChar.name).charAt(0) || '?'));
               };
-              if (snap.char.icon) {
+              if (snapChar.icon) {
                 upAvatarEl.appendChild(V.utils.el('img', {
-                  src: snap.char.icon, alt: '', onerror: setLetter3,
+                  src: snapChar.icon, alt: '', onerror: setLetter3,
                 }));
               } else {
                 setLetter3();
@@ -251,8 +274,8 @@
             upBody = [
               upAvatarEl,
               V.utils.el('span', {
-                className: 'vshell-detail-up-name' + (snap.charConflict ? ' is-conflict' : ''),
-              }, snap.char ? snap.char.name : '角色冲突'),
+                className: 'vshell-detail-up-name' + (snapConflict ? ' is-conflict' : ''),
+              }, snapChar ? snapChar.name : '角色冲突'),
             ];
           } else {
             upBody = [
@@ -266,13 +289,10 @@
         V.utils.el('div', { className: 'vshell-detail-player-card' }, [playerBody]),
       ]);
     }
-    /** v0.6.14：简介骨架（操作行之后，与真实顺序一致） */
+    /** v0.6.23：简介区加载效果——空白文本（保高度）+ shimmer 扫光背景；
+     *  简介只有详情接口才有（预览/表无 desc），加载完成后由 renderMain 替换 */
     function skeletonDesc() {
-      return V.utils.el('div', { className: 'vshell-detail-desc-skeleton' }, [
-        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '100%' } }),
-        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '86%' } }),
-        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '64%' } }),
-      ]);
+      return V.utils.el('div', { className: 'vshell-detail-desc-skeleton vshell-detail-desc-loading' });
     }
     /** v0.6.14：相关推荐骨架（5 项：缩略图块 + 标题/元信息两行条，同真实列表） */
     function skeletonSide() {
@@ -343,8 +363,8 @@
       // v0.6.14：同构骨架——与真实详情布局一致（标题行/信息条/UP 行/视频卡/
       // 简介/相关推荐项），各元素为加载动效占位；操作行/返回按钮为真实静态组件
       // v0.6.15：有卡片快照时，标题/封面先用卡片值（真实文本/封面图）占位
-      var snap = snapFor(mSrc, mId);
-      main.insertBefore(skeletonMain(snap), actionsRow);
+      var snap = tableSnap(mSrc, mId);
+      main.insertBefore(skeletonMain(snap, mSrc, mId), actionsRow);
       main.appendChild(skeletonDesc());      // 简介骨架：操作行之后（真实顺序一致）
       side.appendChild(skeletonSide());
       // 源未启用：直接空态，不发起网络请求（避免网络失败提示掩盖未启用提示）
@@ -399,6 +419,11 @@
           return;
         }
         clearMain();
+        // v0.6.23 详情加载完成 → 全量覆盖 id 表（标题/封面/时长/UP/简介 +
+        // firstDetailAt；详情永远最准，自愈首次预览坏数据）
+        if (V.videoTable && V.videoTable.touchDetail && src && src !== 'local') {
+          try { V.videoTable.touchDetail(src, id, detail); } catch (e) { /* noop */ }
+        }
         renderMain(detail);
         // 播放源（可失败：未登录/风控 → toast）
         adapter.getPlayInfo(mId, detail.cid).then(function (pi) {

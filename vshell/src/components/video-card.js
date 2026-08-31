@@ -661,29 +661,8 @@
     // agg-ui 的 memberOf 用 __item 反查组或成员引用。
     card.__item = item;
     card.__orig = origItem;
-    // v0.6.15：点击进详情前记录卡片快照（详情页加载中先用卡片标题/封面
-    // 占位，加载完成后由详情数据替换）——捕获阶段统一覆盖 media/title/meta 链接
-    // v0.6.18：快照扩展播放量/弹幕/日期（信息条同样先显示卡片值）
-    card.addEventListener('click', function (e) {
-      var a = e.target && e.target.closest ? e.target.closest('a[href^="#/video/"]') : null;
-      if (!a) return;
-      // v0.6.22：快照带卡片角色信息（charFor 同一匹配逻辑）——详情页 UP 行
-      // 加载中先显示卡片上显示的角色（加载完成后由详情数据替换）
-      var cres3 = (charsMod && charsMod.charFor)
-        ? charsMod.charFor(item.id, item) : { kind: 'none' };
-      window.__VS_LAST_CARD__ = {
-        src: item.sourceId || '',
-        id: item.id,
-        title: item.title || '',
-        pic: item.pic || item.cover || '',
-        view: item.stat && item.stat.view,
-        danmaku: item.stat && item.stat.danmaku,
-        pubdate: item.pubdate || 0,
-        char: cres3.kind === 'char'
-          ? { name: cres3.char.name, icon: cres3.char.icon || '' } : null,
-        charConflict: cres3.kind === 'conflict' ? cres3.chars : null,
-      };
-    }, true);
+    // v0.6.23：点击快照退役——详情页加载中占位统一读每源 id 表
+    // （V.videoTable，由 feed 拉取时写入），此处不再记录 __VS_LAST_CARD__。
     if (V.aggUi) {
       card.addEventListener('contextmenu', function (e) {
         e.preventDefault();

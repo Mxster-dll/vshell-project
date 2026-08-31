@@ -2752,6 +2752,18 @@
   flex-direction: column;
   gap: 9px;
 }
+/* v0.6.23：简介区加载效果——空白文本（保高度）+ shimmer 扫光背景；
+   简介只有详情接口才有，预览/表无 desc；加载完成后由 renderMain 替换 */
+.vshell-detail-desc-loading {
+  min-height: 64px;
+  border-radius: 8px;
+  background: linear-gradient(90deg,
+    var(--vscode-list-hoverBackground) 25%,
+    rgba(255, 255, 255, 0.12) 50%,
+    var(--vscode-list-hoverBackground) 75%);
+  background-size: 200% 100%;
+  animation: vshell-shimmer 1.4s ease-in-out infinite;
+}
 /* 相关推荐骨架：缩略图块（168px 16/9 同真实 thumb）+ 标题/元信息两行条 */
 .vshell-detail-related-skel .vshell-detail-related-thumb {
   background: var(--vscode-list-hoverBackground);

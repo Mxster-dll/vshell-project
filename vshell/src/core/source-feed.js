@@ -167,6 +167,11 @@
           hasMore: hasMore,
           savedAt: Date.now(),
         });
+        // v0.6.23 每源视频 id 表：预览拉取到即写（stat 无条件更新、静态
+        // 首次有效写）——详情页占位统一读这张表。
+        if (V.videoTable && V.videoTable.upsertBatch) {
+          V.videoTable.upsertBatch(srcId, relItems);
+        }
       } catch (e) { /* quota */ }
     }
 

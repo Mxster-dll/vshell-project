@@ -28,6 +28,11 @@
   0%, 100% { opacity: 0.55; }
   50% { opacity: 0.9; }
 }
+/* v0.6.23：简介区加载——扫光 shimmer（空白文本 + 光带扫过） */
+@keyframes vshell-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
 
 /* 尊重系统减弱动效设置 */
 @media (prefers-reduced-motion: reduce) {

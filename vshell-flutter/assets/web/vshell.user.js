@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.22
+// @version      0.6.23
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.22';
+window.VShell.version = '0.6.23';
 
 /* vshell 入口见 src/app.js */
 
@@ -4703,6 +4703,170 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
 })();
 
 
+/* ===== src/core/videotable.js ===== */
+
+/* ============================================================
+ * videotable — 每源视频 id 表（v0.6.23 grilling 定稿）
+ *
+ * 用户拍板（以 id 为核心的机制）：
+ *   - 每源一表：vshell.videos.<srcId>，内容 {裸id: 条目}
+ *   - 条目字段：title / cover / view / danmaku / pubdate / duration /
+ *     owner{name,face} / desc(简介，仅详情写入) / firstDetailAt(首次详情标记)
+ *   - 写规则：
+ *       · 预览（feed 拉取/卡片渲染）upsert——**stat 无条件更新**（播放量是
+ *         动态数据，任何渠道加载到都要更新）；**静态字段仅首次有效写**
+ *         （空标题/占位封面不写，等下次有效数据；已有值不再被预览覆盖）
+ *       · 详情加载完成 → **全量覆盖**（标题/封面/时长/UP/简介——详情永远
+ *         最准，能自愈首次预览写入的坏数据）+ 打 firstDetailAt
+ *   - 读规则：详情页占位统一读表（表无则骨架）；**读限启用源**——未启用
+ *     源的 id 即使表里有也不用于占位（与「数据源未启用」空态一致）
+ *   - 表**永不清理**（懒写入，只存被加载过的 id；组 id / 本地视频不落表）
+ *   - 存可持久化 pic/face（相对路径/加密 URL——**不存 blob 会话 URL**）；
+ *     占位渲染时走 V.aggregations.picUrlOf 拼当前 baseUrl + 解密
+ * ============================================================ */
+(function () {
+  'use strict';
+  var V = window.VShell = window.VShell || {};
+
+  var KEY = 'videos';
+  var mem = {};         // srcId → { id → entry }
+  var loaded = {};      // srcId → bool（已从 localStorage 读）
+  var dirtySrcs = {};   // srcId → true（待落盘）
+  var persistTimer = null;
+
+  function fullKey(srcId) {
+    try { return V.store.scopedKey(KEY, srcId); }
+    catch (e) { return KEY + '.' + srcId; }
+  }
+
+  function table(srcId) {
+    if (!loaded[srcId]) {
+      var m = null;
+      try { m = V.store.get(fullKey(srcId)); } catch (e) { /* noop */ }
+      mem[srcId] = (m && typeof m === 'object' && !Array.isArray(m)) ? m : {};
+      loaded[srcId] = true;
+    }
+    return mem[srcId];
+  }
+
+  /** 批量落盘（防抖：合并同 tick 的多次写入） */
+  function schedulePersist() {
+    if (persistTimer) return;
+    persistTimer = setTimeout(function () {
+      persistTimer = null;
+      var srcs = Object.keys(dirtySrcs);
+      dirtySrcs = {};
+      srcs.forEach(function (srcId) {
+        try { V.store.set(fullKey(srcId), mem[srcId] || {}); } catch (e) { /* quota */ }
+      });
+    }, 0);
+  }
+
+  function isValidTitle(t) {
+    return typeof t === 'string' && t.trim().length > 0;
+  }
+  function isValidPic(p) {
+    return typeof p === 'string' && p.length > 0 && p.indexOf('blob:') !== 0;
+  }
+  function num(v) { return (typeof v === 'number' && isFinite(v)) ? v : undefined; }
+
+  /** 预览 upsert：stat 无条件覆盖；静态字段仅首次有效写（已有值不覆盖） */
+  function upsert(srcId, item) {
+    if (!item || !item.id) return;
+    var t = table(srcId);
+    var id = String(item.id);
+    var e = t[id] || {};
+    // 动态字段：无条件更新
+    var st = item.stat;
+    if (st && typeof st === 'object') {
+      var vv = num(st.view); if (vv !== undefined) e.view = vv;
+      var dd = num(st.danmaku); if (dd !== undefined) e.danmaku = dd;
+    }
+    // 静态字段：仅首次有效写（详情 touchDetail 走全量覆盖，不受此限）
+    if (e.title === undefined && isValidTitle(item.title)) e.title = item.title;
+    if (e.cover === undefined && isValidPic(item.pic)) e.cover = item.pic;
+    if (e.cover === undefined && isValidPic(item.cover)) e.cover = item.cover;
+    if (e.pubdate === undefined && num(item.pubdate) !== undefined) e.pubdate = item.pubdate;
+    if (e.duration === undefined && num(item.duration) !== undefined) e.duration = item.duration;
+    if (e.owner === undefined && item.owner && isValidTitle(item.owner.name)) {
+      e.owner = { name: item.owner.name, face: isValidPic(item.owner.face) ? item.owner.face : '' };
+    }
+    t[id] = e;
+    dirtySrcs[srcId] = true;
+    schedulePersist();
+  }
+
+  /** 批量 upsert（feed 拉取后调用） */
+  function upsertBatch(srcId, items) {
+    if (!items || !items.length) return;
+    var any = false;
+    (items || []).forEach(function (it) {
+      if (it && it.id) { upsert(srcId, it); any = true; }
+    });
+    return any;
+  }
+
+  /** 详情加载完成：全量覆盖（标题/封面/时长/UP/简介 + firstDetailAt） */
+  function touchDetail(srcId, id, detail) {
+    if (!detail || typeof detail !== 'object') return;
+    var t = table(srcId);
+    var e = t[String(id)] || {};
+    if (isValidTitle(detail.title)) e.title = detail.title;
+    if (isValidPic(detail.pic)) e.cover = detail.pic;
+    if (num(detail.pubdate) !== undefined) e.pubdate = detail.pubdate;
+    if (num(detail.duration) !== undefined) e.duration = detail.duration;
+    if (detail.owner && isValidTitle(detail.owner.name)) {
+      e.owner = { name: detail.owner.name, face: isValidPic(detail.owner.face) ? detail.owner.face : '' };
+    }
+    if (typeof detail.desc === 'string' && detail.desc.trim().length > 0) e.desc = detail.desc;
+    if (detail.stat && typeof detail.stat === 'object') {
+      var vv = num(detail.stat.view); if (vv !== undefined) e.view = vv;
+      var dd = num(detail.stat.danmaku); if (dd !== undefined) e.danmaku = dd;
+    }
+    e.firstDetailAt = Date.now();
+    t[String(id)] = e;
+    dirtySrcs[srcId] = true;
+    schedulePersist();
+  }
+
+  /** 读表（不落盘）：返回条目或 null */
+  function get(srcId, id) {
+    if (!id) return null;
+    var t = table(srcId);
+    var e = t[String(id)];
+    return e ? e : null;
+  }
+
+  /** 详情占位查询：读限启用源（未启用源 → null）；返回 {title,pic,view,
+   *  danmaku,pubdate,duration,owner} 或 null（表无条目） */
+  function queryDetail(srcId, id) {
+    if (srcId === 'local') return null;
+    var act = [];
+    try { act = V.multisource.activeSources(); } catch (e) { /* noop */ }
+    if (act.indexOf(srcId) < 0) return null;   // 读限启用源
+    var e = get(srcId, id);
+    if (!e) return null;
+    return {
+      title: e.title || '',
+      pic: e.cover || '',
+      view: e.view,
+      danmaku: e.danmaku,
+      pubdate: e.pubdate,
+      duration: e.duration,
+      owner: e.owner || null,
+    };
+  }
+
+  V.videoTable = {
+    upsert: upsert,
+    upsertBatch: upsertBatch,
+    touchDetail: touchDetail,
+    get: get,
+    queryDetail: queryDetail,
+  };
+})();
+
+
 /* ===== src/core/switchoverlay.js ===== */
 
 /* ============================================================
@@ -7543,29 +7707,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     // agg-ui 的 memberOf 用 __item 反查组或成员引用。
     card.__item = item;
     card.__orig = origItem;
-    // v0.6.15：点击进详情前记录卡片快照（详情页加载中先用卡片标题/封面
-    // 占位，加载完成后由详情数据替换）——捕获阶段统一覆盖 media/title/meta 链接
-    // v0.6.18：快照扩展播放量/弹幕/日期（信息条同样先显示卡片值）
-    card.addEventListener('click', function (e) {
-      var a = e.target && e.target.closest ? e.target.closest('a[href^="#/video/"]') : null;
-      if (!a) return;
-      // v0.6.22：快照带卡片角色信息（charFor 同一匹配逻辑）——详情页 UP 行
-      // 加载中先显示卡片上显示的角色（加载完成后由详情数据替换）
-      var cres3 = (charsMod && charsMod.charFor)
-        ? charsMod.charFor(item.id, item) : { kind: 'none' };
-      window.__VS_LAST_CARD__ = {
-        src: item.sourceId || '',
-        id: item.id,
-        title: item.title || '',
-        pic: item.pic || item.cover || '',
-        view: item.stat && item.stat.view,
-        danmaku: item.stat && item.stat.danmaku,
-        pubdate: item.pubdate || 0,
-        char: cres3.kind === 'char'
-          ? { name: cres3.char.name, icon: cres3.char.icon || '' } : null,
-        charConflict: cres3.kind === 'conflict' ? cres3.chars : null,
-      };
-    }, true);
+    // v0.6.23：点击快照退役——详情页加载中占位统一读每源 id 表
+    // （V.videoTable，由 feed 拉取时写入），此处不再记录 __VS_LAST_CARD__。
     if (V.aggUi) {
       card.addEventListener('contextmenu', function (e) {
         e.preventDefault();
@@ -8718,6 +8861,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           hasMore: hasMore,
           savedAt: Date.now(),
         });
+        // v0.6.23 每源视频 id 表：预览拉取到即写（stat 无条件更新、静态
+        // 首次有效写）——详情页占位统一读这张表。
+        if (V.videoTable && V.videoTable.upsertBatch) {
+          V.videoTable.upsertBatch(srcId, relItems);
+        }
       } catch (e) { /* quota */ }
     }
 
@@ -14403,18 +14551,24 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       if (ak) main.appendChild(ak);
     }
 
-    // v0.6.15：来源卡片快照（video-card 点击详情链接前写入）——详情加载中
-    // 标题/封面先用卡片值占位，加载完成后由详情数据替换
-    var cardSnap = window.__VS_LAST_CARD__ || null;
-    /** 快照匹配：普通（源,id）一致；组卡（id 含 grp: 前缀）按组 id 匹配 */
-    function snapFor(mSrc, mId) {
-      if (!cardSnap) return null;
-      var sid = String(cardSnap.id || '');
-      if (sid.indexOf('grp:') === 0) {
-        return (isGroup && gid === sid) ? cardSnap : null;
+    // v0.6.23：详情加载中占位统一读**每源视频 id 表**（V.videoTable）——
+    // 表由 feed 拉取/卡片渲染时写入（预览首写）+ 详情加载覆盖（touchDetail），
+    // 与视频卡片共一个本地源；读限启用源（未启用源 → null → 骨架）。
+    // 组详情（grp:）不落表 → 占位回退骨架。
+    function tableSnap(mSrc, mId) {
+      if (!V.videoTable || !V.videoTable.queryDetail) return null;
+      if (isGroup) return null;
+      var s = null;
+      try { s = V.videoTable.queryDetail(mSrc, mId); } catch (e) { return null; }
+      if (!s) return null;
+      // 表存相对化 pic（feed 持久化形态）——拼当前 baseUrl（17c 等加密源
+      // 保持密文原样，由 skeletonMain 异步 picUrlOf 解密）
+      if (s.pic && s.pic.charAt(0) === '/') {
+        var b = (V.aggregations && V.aggregations.wallBaseUrl)
+          ? V.aggregations.wallBaseUrl(mSrc) : '';
+        if (b) s.pic = b + s.pic;
       }
-      if (cardSnap.src === mSrc && sid === String(mId)) return cardSnap;
-      return null;
+      return s;
     }
 
     /** v0.6.19：详情加载后把最新播放/弹幕数回写各墙缓存分片——卡片=列表
@@ -14453,7 +14607,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
      *  v0.6.15/18：snap 为来源卡片快照——标题/封面/播放量行（播放/弹幕/
      *  日期）先显示卡片真实值（无快照/无值则回落骨架占位）；
      *  加载完成后 renderMain 整体替换为详情数据 */
-    function skeletonMain(snap) {
+    function skeletonMain(snap, mSrc, mId) {
       snap = snap || null;
       var titleEl = (snap && snap.title)
         ? V.utils.el('h1', { className: 'vshell-detail-title' }, snap.title)
@@ -14463,6 +14617,17 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
             className: 'vshell-detail-poster-skel', src: snap.pic, alt: '',
           })
         : V.utils.el('div', { className: 'vshell-skeleton-block vshell-skeleton-player' });
+      // v0.6.23：加密图源（17c）占位封面异步解密（picUrlOf 拼 baseUrl+解密）
+      if (snap && snap.pic && mSrc && V.aggregations && V.aggregations.picUrlOf
+        && V.siteAdapters && V.siteAdapters.picDecryptorFor
+        && V.siteAdapters.picDecryptorFor(mSrc)) {
+        var imgEl = playerBody.tagName === 'IMG' ? playerBody : null;
+        if (imgEl) {
+          V.aggregations.picUrlOf(mSrc, { pic: snap.pic }).then(function (u) {
+            if (u && imgEl.isConnected) imgEl.src = u;
+          }).catch(function () { /* 保持原样 */ });
+        }
+      }
       // v0.6.18：信息条先显示卡片播放量/弹幕/日期（无快照值 → 骨架条）
       var statsBody;
       if (snap && (snap.view || snap.danmaku || snap.pubdate)) {
@@ -14495,24 +14660,30 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         // 2. 信息条：卡片播放量/弹幕/日期（或骨架条）
         V.utils.el('div', { className: 'vshell-detail-stats' }, statsBody),
         // 3. UP/角色行：v0.6.22 先用卡片角色信息（角色头像+名字/冲突红字），
+        //    v0.6.23 角色从表标题实时 charFor 匹配（与卡片同一匹配逻辑，快照退役）；
         //    无角色信息才回落骨架（圆+条）；加载完成后由 renderUpRow 替换
         (function () {
           var upBody;
-          var snapChar = snap && (snap.char || snap.charConflict);
-          if (snapChar) {
+          var snapChar = null, snapConflict = null;
+          if (snap && snap.title && V.characters && V.characters.charFor) {
+            var cres3 = V.characters.charFor(mId, { id: mId, title: snap.title, sourceId: mSrc });
+            if (cres3.kind === 'char') snapChar = { name: cres3.char.name, icon: cres3.char.icon || '' };
+            else if (cres3.kind === 'conflict') snapConflict = cres3.chars;
+          }
+          if (snapChar || snapConflict) {
             var upAvatarEl = V.utils.el('span', {
-              className: 'vshell-detail-up-avatar' + (snap.charConflict ? ' is-conflict' : ''),
+              className: 'vshell-detail-up-avatar' + (snapConflict ? ' is-conflict' : ''),
             });
-            if (snap.char) {
+            if (snapChar) {
               var setLetter3 = function () {
                 upAvatarEl.innerHTML = '';
                 upAvatarEl.appendChild(V.utils.el('span', {
                   className: 'vshell-detail-up-avatar-letter',
-                }, String(snap.char.name).charAt(0) || '?'));
+                }, String(snapChar.name).charAt(0) || '?'));
               };
-              if (snap.char.icon) {
+              if (snapChar.icon) {
                 upAvatarEl.appendChild(V.utils.el('img', {
-                  src: snap.char.icon, alt: '', onerror: setLetter3,
+                  src: snapChar.icon, alt: '', onerror: setLetter3,
                 }));
               } else {
                 setLetter3();
@@ -14525,8 +14696,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
             upBody = [
               upAvatarEl,
               V.utils.el('span', {
-                className: 'vshell-detail-up-name' + (snap.charConflict ? ' is-conflict' : ''),
-              }, snap.char ? snap.char.name : '角色冲突'),
+                className: 'vshell-detail-up-name' + (snapConflict ? ' is-conflict' : ''),
+              }, snapChar ? snapChar.name : '角色冲突'),
             ];
           } else {
             upBody = [
@@ -14540,13 +14711,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         V.utils.el('div', { className: 'vshell-detail-player-card' }, [playerBody]),
       ]);
     }
-    /** v0.6.14：简介骨架（操作行之后，与真实顺序一致） */
+    /** v0.6.23：简介区加载效果——空白文本（保高度）+ shimmer 扫光背景；
+     *  简介只有详情接口才有（预览/表无 desc），加载完成后由 renderMain 替换 */
     function skeletonDesc() {
-      return V.utils.el('div', { className: 'vshell-detail-desc-skeleton' }, [
-        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '100%' } }),
-        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '86%' } }),
-        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '64%' } }),
-      ]);
+      return V.utils.el('div', { className: 'vshell-detail-desc-skeleton vshell-detail-desc-loading' });
     }
     /** v0.6.14：相关推荐骨架（5 项：缩略图块 + 标题/元信息两行条，同真实列表） */
     function skeletonSide() {
@@ -14617,8 +14785,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       // v0.6.14：同构骨架——与真实详情布局一致（标题行/信息条/UP 行/视频卡/
       // 简介/相关推荐项），各元素为加载动效占位；操作行/返回按钮为真实静态组件
       // v0.6.15：有卡片快照时，标题/封面先用卡片值（真实文本/封面图）占位
-      var snap = snapFor(mSrc, mId);
-      main.insertBefore(skeletonMain(snap), actionsRow);
+      var snap = tableSnap(mSrc, mId);
+      main.insertBefore(skeletonMain(snap, mSrc, mId), actionsRow);
       main.appendChild(skeletonDesc());      // 简介骨架：操作行之后（真实顺序一致）
       side.appendChild(skeletonSide());
       // 源未启用：直接空态，不发起网络请求（避免网络失败提示掩盖未启用提示）
@@ -14673,6 +14841,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           return;
         }
         clearMain();
+        // v0.6.23 详情加载完成 → 全量覆盖 id 表（标题/封面/时长/UP/简介 +
+        // firstDetailAt；详情永远最准，自愈首次预览坏数据）
+        if (V.videoTable && V.videoTable.touchDetail && src && src !== 'local') {
+          try { V.videoTable.touchDetail(src, id, detail); } catch (e) { /* noop */ }
+        }
         renderMain(detail);
         // 播放源（可失败：未登录/风控 → toast）
         adapter.getPlayInfo(mId, detail.cid).then(function (pi) {
@@ -22695,6 +22868,18 @@ html.vshell::-webkit-scrollbar {
   flex-direction: column;
   gap: 9px;
 }
+/* v0.6.23：简介区加载效果——空白文本（保高度）+ shimmer 扫光背景；
+   简介只有详情接口才有，预览/表无 desc；加载完成后由 renderMain 替换 */
+.vshell-detail-desc-loading {
+  min-height: 64px;
+  border-radius: 8px;
+  background: linear-gradient(90deg,
+    var(--vscode-list-hoverBackground) 25%,
+    rgba(255, 255, 255, 0.12) 50%,
+    var(--vscode-list-hoverBackground) 75%);
+  background-size: 200% 100%;
+  animation: vshell-shimmer 1.4s ease-in-out infinite;
+}
 /* 相关推荐骨架：缩略图块（168px 16/9 同真实 thumb）+ 标题/元信息两行条 */
 .vshell-detail-related-skel .vshell-detail-related-thumb {
   background: var(--vscode-list-hoverBackground);
@@ -24894,6 +25079,11 @@ body.vshell-dragging a { pointer-events: none; }
 @keyframes vshell-pulse {
   0%, 100% { opacity: 0.55; }
   50% { opacity: 0.9; }
+}
+/* v0.6.23：简介区加载——扫光 shimmer（空白文本 + 光带扫过） */
+@keyframes vshell-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 
 /* 尊重系统减弱动效设置 */

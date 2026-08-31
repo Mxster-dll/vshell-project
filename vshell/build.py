@@ -42,6 +42,7 @@ JS_FILES = [
     "core/data-source.js",   # v0.5.6 用户需求：设置面板「数据源」项（v0.5.10 独立化：无内置源）
     "core/multisource.js",   # v0.5.7 用户需求：多数据源核心（激活集/隐私排除/预取 k/并集读写）
     "core/aggregations.js",  # v0.6.1 用户需求：视频聚合（组=虚拟条目，phash 自动并入/主成员/播放排序）
+    "core/videotable.js",    # v0.6.23 用户需求：每源视频 id 表（详情占位索引 + 详情回写；预览首写+详情恒覆盖）
     "core/switchoverlay.js", # v0.5.6 用户需求：数据源切换加载遮罩（切换标记+全屏 spinner）
     "adapters/site-adapter.js",
     # v0.5.10 独立化：bilibili 不再内置——已抽为独立插件文件
