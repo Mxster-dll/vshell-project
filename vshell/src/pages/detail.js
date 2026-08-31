@@ -46,22 +46,18 @@
 
     var page = V.utils.el('div', { className: 'vshell-page vshell-page-detail' });
     outlet.appendChild(page);
-    // v0.6.1：内容区（骨架/详情/空态）——成员切换时整体重建；
-    // 组条/返回按钮挂 page 顶层不动
+    // v0.6.11：内容区两栏容器（首次 loadMember 创建，成员切换复用）——
+    // 页面框架先出，主视频区/相关推荐区各自独立加载
     var contentBox = V.utils.el('div', { className: 'vshell-detail-content' });
     page.appendChild(contentBox);
+    var layout = null, main = null, side = null;
 
     var currentTitle = '';
     var currentPic = '';
     var copyTimer = null;   // 复制按钮动画复位定时器
 
-    // ---- 骨架 ----
-    var skeleton = V.utils.el('div', { className: 'vshell-detail-skeleton' }, [
-      V.utils.el('div', { className: 'vshell-skeleton-block vshell-skeleton-player' }),
-      V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '60%' } }),
-      V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '35%' } }),
-    ]);
-    contentBox.appendChild(skeleton);
+    // v0.6.11：不再整块骨架屏——页面框架（两栏布局）先出，
+    // 主视频区/相关推荐区在 loadMember 内各自显示局部加载动画
 
     // ---- 加载数据 ----
     // v0.5.7：源未启用（角色页/收藏页全源快照可见但源未激活，**含内置源**）→
@@ -81,7 +77,9 @@
     }
 
     /** v0.6.1 加载单个成员详情（组详情切换/普通详情共用）：
-     *  切换时清理上一次渲染（curCleanup），内容区整体重建 */
+     *  切换时清理上一次渲染（curCleanup），内容区整体重建
+     *  v0.6.11 页面框架先出：两栏布局容器首次创建后复用；主视频区与
+     *  相关推荐区各自独立请求 + 各自局部加载动画，数据到达分别填充 */
     function loadMember(mSrc, mId) {
       src = mSrc; id = mId;
       isLocal = mSrc === 'local';
@@ -90,23 +88,39 @@
       detailSrc = isLocal ? 'local'
         : (mSrc || (V.multisource ? V.multisource.primary() : 'acfun'));
       if (curCleanup) { try { curCleanup(); } catch (e) { /* noop */ } curCleanup = null; }
-      contentBox.innerHTML = '';
-      var sk2 = V.utils.el('div', { className: 'vshell-detail-skeleton' }, [
+      // 两栏容器（首次创建，成员切换复用）
+      if (!layout) {
+        layout = V.utils.el('div', { className: 'vshell-detail-layout' });
+        main = V.utils.el('div', { className: 'vshell-detail-main' });
+        side = V.utils.el('div', { className: 'vshell-detail-side' });
+        layout.appendChild(main);
+        layout.appendChild(side);
+        contentBox.appendChild(layout);
+      }
+      main.innerHTML = '';
+      side.innerHTML = '';
+      // 局部加载动画（骨架 pulse；主区播放器大块 + 行，侧栏行）
+      main.appendChild(V.utils.el('div', { className: 'vshell-detail-skeleton' }, [
         V.utils.el('div', { className: 'vshell-skeleton-block vshell-skeleton-player' }),
         V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '60%' } }),
         V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '35%' } }),
-      ]);
-      contentBox.appendChild(sk2);
+      ]));
+      side.appendChild(V.utils.el('div', { className: 'vshell-detail-skeleton' }, [
+        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '85%' } }),
+        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '70%' } }),
+        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '80%' } }),
+        V.utils.el('div', { className: 'vshell-skeleton-line', style: { width: '65%' } }),
+      ]));
       // 源未启用：直接空态，不发起网络请求（避免网络失败提示掩盖未启用提示）
       var disMsg2 = srcDisabledMsg();
       if (disMsg2) {
-        sk2.remove();
-        contentBox.appendChild(V.wall.empty(disMsg2, 'codicon-error'));
+        main.innerHTML = '';
+        main.appendChild(V.wall.empty(disMsg2, 'codicon-error'));
         return;
       }
       if (!adapter && !isLocal) {
-        sk2.remove();
-        contentBox.appendChild(V.wall.empty(srcDisabledMsg() || '数据源不可用', 'codicon-error'));
+        main.innerHTML = '';
+        main.appendChild(V.wall.empty(srcDisabledMsg() || '数据源不可用', 'codicon-error'));
         return;
       }
       // v0.5.6 第十二轮需求 2：本地视频数据源——不查网站接口，
@@ -114,8 +128,8 @@
       if (isLocal && V.localVideos) {
         var lv = V.localVideos.find('local:' + mId);
         if (!lv) {
-          sk2.remove();
-          contentBox.appendChild(V.wall.empty('本地视频不存在或已删除', 'codicon-error'));
+          main.innerHTML = '';
+          main.appendChild(V.wall.empty('本地视频不存在或已删除', 'codicon-error'));
         } else {
           var ldetail = {
             id: 'local:' + mId, bvid: 'local:' + mId, cid: 0,
@@ -124,8 +138,8 @@
             pubdate: lv.pubdate || 0, duration: lv.duration || 0,
             tname: '本地视频', local: true,
           };
-          sk2.remove();
-          render(ldetail, []);
+          main.innerHTML = '';
+          renderMain(ldetail);
           V.localVideos.playInfo(lv).then(function (pi) {
             if (done) return;
             playInfo = pi;
@@ -137,23 +151,19 @@
         }
         return;
       }
-      Promise.all([
-        adapter.getVideoDetail(mId),
-        adapter.getRelated(mId).catch(function () { return []; }),
-      ]).then(function (res) {
+      // ---- 主视频区：详情独立加载 ----
+      adapter.getVideoDetail(mId).then(function (detail) {
         if (done) return;
-        var detail = res[0];
-        var related = res[1];
         // v0.5.7：详情数据不存在（幽灵卡 id 已失效 / adapter 返回 null）→
         // 空态而非崩溃（修复 "Cannot set properties of null (setting 'sourceId')"）；
         // 源未启用时优先提示去设置启用（角色页快照卡常见）
         if (!detail || typeof detail !== 'object') {
-          sk2.remove();
-          contentBox.appendChild(V.wall.empty(srcDisabledMsg() || '详情加载失败：视频不存在或已失效', 'codicon-error'));
+          main.innerHTML = '';
+          main.appendChild(V.wall.empty(srcDisabledMsg() || '详情加载失败：视频不存在或已失效', 'codicon-error'));
           return;
         }
-        sk2.remove();
-        render(detail, related);
+        main.innerHTML = '';
+        renderMain(detail);
         // 播放源（可失败：未登录/风控 → toast）
         adapter.getPlayInfo(mId, detail.cid).then(function (pi) {
           if (done) return;
@@ -165,8 +175,17 @@
         });
       }).catch(function (e) {
         if (done) return;
-        sk2.remove();
-        contentBox.appendChild(V.wall.empty('详情加载失败：' + e.message, 'codicon-error'));
+        main.innerHTML = '';
+        main.appendChild(V.wall.empty('详情加载失败：' + e.message, 'codicon-error'));
+      });
+      // ---- 相关推荐区：独立加载（失败静默清空） ----
+      adapter.getRelated(mId).then(function (related) {
+        if (done) return;
+        side.innerHTML = '';
+        renderRelated(related || []);
+      }).catch(function () {
+        if (done) return;
+        side.innerHTML = '';
       });
     }
 
@@ -300,14 +319,9 @@
     }
 
     // ---- 渲染 ----
-    function render(detail, related) {
-      // v0.5.7：详情数据不存在（缓存幽灵卡 id 已失效 / adapter 返回 null）→
-      // 空态而非崩溃（修复 "Cannot set properties of null (setting 'sourceId')"）
-      if (!detail || typeof detail !== 'object') {
-        skeleton.remove();
-        contentBox.appendChild(V.wall.empty('详情加载失败：视频不存在或已失效', 'codicon-error'));
-        return;
-      }
+    // v0.6.11：render 拆分 renderMain（主视频区）+ renderRelated（相关推荐区）
+    // ——两栏容器由 loadMember 创建，主区/相关区独立填充
+    function renderMain(detail) {
       // v0.6.1 聚合：组详情——收藏/待看/黑名单按**组 id**存（组级一条），
       // 标题/封面用组主成员；播放/分镜/相关仍用当前成员（闭包 id 变量）
       if (isGroup) {
@@ -322,14 +336,7 @@
       currentPic = detail.pic || '';
       updateChip(src, id, detail.title);   // v0.6.1 组详情：回填成员 chip 标题
 
-      // 两栏骨架：左主 + 右相关（学 bilibili；窄屏 responsive.css 落回单列）
-      var layout = V.utils.el('div', { className: 'vshell-detail-layout' });
-      var main = V.utils.el('div', { className: 'vshell-detail-main' });
-      var side = V.utils.el('div', { className: 'vshell-detail-side' });
-      layout.appendChild(main);
-      layout.appendChild(side);
-      contentBox.appendChild(layout);
-
+      // 两栏容器已在 loadMember 建好（v0.6.11），main 直接填充
       // 1. 标题（顶部）+ 复制按钮（点击后按钮自身有小动画：图标变对勾 + 脉冲）
       // v0.5.6 第十轮（用户需求 1）：返回按钮——置 __VS_KEEP_SCROLL__
       // 标志后返回，来源页恢复进入前的位置（需求 2：只有返回按钮保留）
@@ -576,39 +583,10 @@
         main.appendChild(descBox);
       }
 
-      // 7. 相关推荐（右栏列表，学 bilibili：缩略图 + 标题 + UP·播放数）
-      // v0.3.2 黑名单：全站过滤（相关推荐也隐藏被屏蔽的视频）
-      var relatedOk = V.blacklist ? V.blacklist.filter(related) : related;
-      if (relatedOk && relatedOk.length) {
-        var list = V.utils.el('ul', { className: 'vshell-detail-related' });
-        relatedOk.forEach(function (r) {
-          var rv = r.stat && r.stat.view;
-          var thumb = V.utils.el('span', { className: 'vshell-detail-related-thumb' }, [
-            r.pic
-              ? V.utils.el('img', { src: r.pic, alt: '', loading: 'lazy' })
-              : V.utils.el('span', { className: 'codicon codicon-play' }),
-            r.duration
-              ? V.utils.el('span', { className: 'vshell-detail-related-dur' }, V.utils.fmtTime(r.duration))
-              : null,
-          ]);
-          var info = V.utils.el('span', { className: 'vshell-detail-related-info' }, [
-            V.utils.el('span', { className: 'vshell-detail-related-name' }, r.title || ''),
-            V.utils.el('span', { className: 'vshell-detail-related-meta' },
-              ((r.owner && r.owner.name) || '') +
-              (rv ? ' · ' + V.utils.fmtCount(rv) + '播放' : '')),
-          ]);
-          var li = V.utils.el('li');
-          li.appendChild(V.utils.el('a', {
-            className: 'vshell-detail-related-item',
-            href: '#/video/' + encodeURIComponent(r.id),
-            title: r.title || '',
-          }, [thumb, info]));
-          list.appendChild(li);
-        });
-        side.appendChild(list);
-      }
       // v0.6.1：当前渲染的清理函数（成员切换/页面卸载时统一销毁，
       // 避免 player/监听/分镜任务泄漏到下一次渲染）
+      // v0.6.11：layout 由 loadMember 复用（成员切换不销毁），
+      // 页面卸载时随 page.remove() 一起移除
       curCleanup = function () {
         if (offChars) { try { offChars(); } catch (e) { /* noop */ } offChars = null; }
         if (offGapChange) { try { offGapChange(); } catch (e) { /* noop */ } offGapChange = null; }
@@ -616,8 +594,40 @@
         if (shotsStopScan) { try { shotsStopScan(); } catch (e) { /* noop */ } shotsStopScan = null; }
         hideScanProgress();
         if (player) { try { player.destroy(); } catch (e) { /* noop */ } player = null; }
-        layout.remove();
       };
+    }
+
+    /** v0.6.11 相关推荐区独立渲染（右栏列表，学 bilibili：缩略图 + 标题 +
+     *  UP·播放数）；v0.3.2 黑名单：全站过滤（相关推荐也隐藏被屏蔽的视频） */
+    function renderRelated(related) {
+      var relatedOk = V.blacklist ? V.blacklist.filter(related) : related;
+      if (!relatedOk || !relatedOk.length) return;
+      var list = V.utils.el('ul', { className: 'vshell-detail-related' });
+      relatedOk.forEach(function (r) {
+        var rv = r.stat && r.stat.view;
+        var thumb = V.utils.el('span', { className: 'vshell-detail-related-thumb' }, [
+          r.pic
+            ? V.utils.el('img', { src: r.pic, alt: '', loading: 'lazy' })
+            : V.utils.el('span', { className: 'codicon codicon-play' }),
+          r.duration
+            ? V.utils.el('span', { className: 'vshell-detail-related-dur' }, V.utils.fmtTime(r.duration))
+            : null,
+        ]);
+        var info = V.utils.el('span', { className: 'vshell-detail-related-info' }, [
+          V.utils.el('span', { className: 'vshell-detail-related-name' }, r.title || ''),
+          V.utils.el('span', { className: 'vshell-detail-related-meta' },
+            ((r.owner && r.owner.name) || '') +
+            (rv ? ' · ' + V.utils.fmtCount(rv) + '播放' : '')),
+        ]);
+        var li = V.utils.el('li');
+        li.appendChild(V.utils.el('a', {
+          className: 'vshell-detail-related-item',
+          href: '#/video/' + encodeURIComponent(r.id),
+          title: r.title || '',
+        }, [thumb, info]));
+        list.appendChild(li);
+      });
+      side.appendChild(list);
     }
 
     function actionBtn(icon, label, kind) {
