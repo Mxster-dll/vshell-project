@@ -888,6 +888,10 @@
         title: '从角色「' + role.name + '」排除该视频',
         'aria-label': '从角色「' + role.name + '」排除',
         onclick: function (e) {
+          // 按钮嵌在 media <a href="#/video/..."> 内——stopPropagation 只停
+          // 冒泡、不阻止 <a> 的**默认导航**（点击后会进详情页，用户实测）。
+          // 必须 preventDefault（video-card 其他按钮同款）。
+          if (e && e.preventDefault) e.preventDefault();
           if (e && e.stopPropagation) e.stopPropagation();
           var srcId = it && it.sourceId && it.sourceId !== 'local' ? it.sourceId : null;
           if (!srcId) {
@@ -970,7 +974,19 @@
       var rest = [];
       agg.items.forEach(function (it) {
         var k = dedupKeyOf(it);
-        if (!(it && it.id && seen[k])) rest.push(it);
+        if (!(it && it.id && seen[k])) {
+          // v0.6.67：排除后重建——agg.items 里**已取出**的卡不再过 feed
+          // filter（filter 只作用于 feed 拉取/缓存加载），排除过的视频
+          // 会随 renderMerged 重建再次出现（card.remove 后又被加回）。
+          // 渲染层兜底再筛一遍角色级排除表。
+          if (V.characters && V.characters.isRoleExcluded && it.sourceId
+              && it.sourceId !== 'local') {
+            try {
+              if (V.characters.isRoleExcluded(role.name, it.sourceId, it.id)) return;
+            } catch (e) { /* noop */ }
+          }
+          rest.push(it);
+        }
       });
       return local.concat(manual).concat(rest);
     }
