@@ -27,8 +27,11 @@
   }
 
   /** dy>0 向下滚（内容上移）；x,y = CSS 像素（相对视口）。
-   *  v0.6.73：平滑滚动（rAF 插值）——滚轮不再硬跳。 */
+   *  v0.6.73：平滑滚动（rAF 插值）——滚轮不再硬跳。
+   *  v0.6.75：标记用户已滚动——app.js 恢复轮询检测到后放弃强制恢复
+   *  （否则加载窗口期滚动被反复拉回旧位置）。 */
   window.__VS_SCROLL__ = function (dy, x, y) {
+    window.__VS_USER_SCROLLING__ = true;
     var target = findScrollable(x, y);
     if (target) {
       if (V.smoothScroll && V.smoothScroll.scrollBy && V.smoothScroll.scrollBy(target, dy)) return;

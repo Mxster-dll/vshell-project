@@ -165,7 +165,6 @@
       var t0 = Date.now();
       var tryRestore = function () {
         if (scrollState[route.name] !== saved) return;
-        restoreScroll(saved);
         var sc = document.querySelector('.vshell-page');
         var feed = sc && sc.querySelector('.vshell-feed');
         var cur = feed ? feed.scrollTop : (sc ? sc.scrollTop : 0);
@@ -174,6 +173,15 @@
           window.__VS_RESTORE_PATH__ = 'poll';
           reveal();
           calibrate(saved);
+          return;
+        }
+        // v0.6.75：用户在恢复窗口内已滚动（滚轮桥/原生 wheel 标记）——
+        // 放弃恢复，尊重用户当前滚动位置（否则每 300ms 强制拉回 saved
+        // 会打断滚动/平滑动画，实测加载后滚动被反复拽回旧位置）
+        if (window.__VS_USER_SCROLLING__) {
+          delete scrollState[route.name];
+          window.__VS_RESTORE_PATH__ = 'user-scroll';
+          reveal();
           return;
         }
         if (Date.now() - t0 < 3000) setTimeout(tryRestore, 300);
@@ -495,6 +503,23 @@
     // ——确保启动后 --vshell-card-gap/--vshell-card-min 一定在 documentElement 上
     try { if (V.cardGap && V.cardGap.apply) V.cardGap.apply(); } catch (e) { /* noop */ }
     try { if (V.cardSize && V.cardSize.apply) V.cardSize.apply(); } catch (e) { /* noop */ }
+    // v0.6.75：Chromium 可能在 scrollRestoration='manual' 生效前（加载早期）
+    // 恢复过滚动位置（实测新实例加载后 scrollTop=上次会话值 676，恢复窗口
+    // 在加载后 ~1s 内，JS 层面无写入者，patch scrollTop 只抓到自身赋值）——
+    // 延迟到恢复窗口之后（1.5s）再检查重置；scrollState 是内存态，新会话
+    // 无恢复记录 → 重置顶部；同会话返回（有记录）保留。窗口内用户已滚动
+    // （__VS_USER_SCROLLING__，滚轮桥标记）→ 不重置，尊重用户位置。
+    setTimeout(function () {
+      try {
+        if (window.__VS_USER_SCROLLING__) return;
+        var _r = (V.router && V.router.resolve) ? V.router.resolve(location.hash) : null;
+        var _name = _r ? _r.name : null;
+        if (!_name || !scrollState[_name]) {
+          var _sc = document.querySelector('.vshell-page');
+          if (_sc && _sc.scrollTop !== 0) _sc.scrollTop = 0;
+        }
+      } catch (e) { /* noop */ }
+    }, 1500);
   }
 
   /** 启动：插件数据源时先 ensureLoaded（读文件注入适配器）再 boot——

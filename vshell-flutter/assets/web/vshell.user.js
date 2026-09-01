@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.74
+// @version      0.6.75
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.74';
+window.VShell.version = '0.6.75';
 
 /* vshell 入口见 src/app.js */
 
@@ -3838,21 +3838,23 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
 /* ===== src/core/smoothscroll.js ===== */
 
 /* ============================================================
- * smoothscroll — 视频墙平滑滚动（v0.6.73→v0.6.74 用户需求：任何
- * 视频墙都添加平滑滚动效果；v0.6.74 用户反馈「平滑效果很差，滚动
- * 哪有回弹的」→ 重写动画核心）
+ * smoothscroll — 视频墙平滑滚动（v0.6.74→v0.6.75 用户需求：任何
+ * 视频墙都添加平滑滚动效果；经用户建议参考成熟实现，照抄 Lenis
+ * （github.com/darkroomengineering/lenis）核心算法重写）
  *
- * 桌面滚轮默认是行级硬跳（每格一步，不流畅）。本模块把滚动改为
- * Lenis 式指数趋近（业界标准 smooth-scroll 算法）：
- *   target += dy（滚轮增量累积目标位置，clamp 到边界）
- *   current += (target - current) * (1 - e^(-dt/TAU))（帧时间无关
- *   指数衰减，TAU=60ms）
- * 特性：
- *  - 无过冲/回弹（指数趋近单调收敛，永远不越过目标）；
- *  - 连续滚轮输入自然跟手（target 持续累积，速度随输入变化）；
- *  - 停止滚动即快速收敛（3×TAU ≈ 180ms 到位，无固定时长尾随感
- *    ——v0.6.73 的 240ms easeOutCubic 每段慢启动 + 松手拖尾是
- *    「回弹/很差」的根源，已废弃）。
+ * Lenis LERP 模式（DeepWiki 确认）：
+ *   value = value + (target - value) * lerp
+ *   lerpFactor = 1 - (1 - lerp)^(dt / 16.6667)   // 帧率补偿
+ *   velocity = delta / dt                         // 速度跟踪
+ *   停止：|target - value| <= 0.5 或 velocity <= 0.001
+ *
+ * 特性（与 Lenis 一致的"丝滑"体验）：
+ *  - 虚拟位置 s.pos：动画独立于真实 scrollTop（不受外部改动干扰），
+ *    动画未跑时校准到真实位置；
+ *  - 纯指数趋近、无即时跳变：快速滚动时 diff 累积大 → 每帧位移大 →
+ *    视觉为连续加速的惯性滚动（无逐格跳感——v0.6.74 等效 lerp 0.34
+ *    每格动画独立+50% 即时跳是"不顺滑"的根源）；
+ *  - 默认 lerp = 0.1（Lenis 默认值）：停止后快速收敛，无长尾随。
  *
  * 两个入口统一走 V.smoothScroll.scrollBy：
  *  - Flutter 壳滚轮桥（scrollbridge.js 的 __VS_SCROLL__）——
@@ -3867,62 +3869,59 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   'use strict';
   var V = window.VShell = window.VShell || {};
 
-  var TAU = 30;   // 指数衰减时间常数 ms（帧时间无关：f = 1 - e^(-dt/TAU)）
-                  // 30ms → 50% 在 21ms、95% 在 90ms：只负责补齐剩余增量，干脆不拖
-  var SNAP = 12;  // 收尾阈值 px：剩余距离小于该值直接落位（消除慢尾巴）
-  var INSTANT = 0.5;  // 滚轮增量即时响应比例：立即移动 50%（跟手），
-                      // 其余 50% 平滑补齐（v0.6.74 用户反馈"很阻滞"的修复）
+  // Lenis 默认 0.1 对我们场景（滚轮每格 ~60px 小步）太慢（700ms/格）。
+  // 0.25：单格 ~240ms 到位、前 100ms 移动 75%——跟手且连续惯性
+  //（滚快时 diff 大 → 每帧位移大 → 连续加速无逐格感）
+  var LERP = 0.25;
 
   var states = (typeof WeakMap === 'function') ? new WeakMap() : null;
   function getState(el) {
     if (states) {
       var s = states.get(el);
       if (!s) {
-        s = { target: 0, raf: 0, last: 0 };
+        s = { target: 0, pos: 0, vel: 0, raf: 0, last: 0 };
         states.set(el, s);
       }
       return s;
     }
-    if (!el.__vsSmooth) el.__vsSmooth = { target: 0, raf: 0, last: 0 };
+    if (!el.__vsSmooth) el.__vsSmooth = { target: 0, pos: 0, vel: 0, raf: 0, last: 0 };
     return el.__vsSmooth;
   }
   function maxTop(el) { return Math.max(0, el.scrollHeight - el.clientHeight); }
   function clampNum(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
+  /** Lenis damp：帧率补偿的指数趋近 */
+  function damp(current, target, dt) {
+    var f = 1 - Math.pow(1 - LERP, dt / 16.6667);
+    return current + (target - current) * f;
+  }
+
   function tick(el, s, now) {
-    var cur = el.scrollTop;
-    var diff = s.target - cur;
-    if (Math.abs(diff) < SNAP) {
-      // 收尾：剩余小于阈值直接落位（消除指数衰减的慢尾巴）
+    var dt = Math.min(64, Math.max(1, now - (s.last || now)));   // ms
+    if (!(dt > 0)) dt = 16;   // 防御：now 缺失/NaN 时按一帧计
+    s.last = now;
+    var prev = s.pos;
+    s.pos = damp(s.pos, s.target, dt);
+    s.vel = (s.pos - prev) / dt;     // px/ms
+    el.scrollTop = s.pos;
+    if (Math.abs(s.target - s.pos) <= 0.5 || s.vel <= 0.001) {
       el.scrollTop = s.target;
       s.raf = 0;
       return;
     }
-    var dt = Math.min(64, Math.max(1, now - (s.last || now)));
-    if (!(dt > 0)) dt = 16;   // 防御：now 缺失/NaN 时按一帧计（首帧触顶 bug 兜底）
-    s.last = now;
-    var f = 1 - Math.exp(-dt / TAU);
-    el.scrollTop = cur + diff * f;
     s.raf = requestAnimationFrame(function (n) { tick(el, s, n); });
   }
 
-  /** 平滑滚动：dy = 目标增量（像素）。容器不可滚/无增量返回 false。
-   *  即时响应：增量立即移动 INSTANT 比例（跟手、消除"阻滞"），
-   *  剩余部分由指数衰减动画平滑补齐（无跳变）。
-   *  动画中 target 必须累加全量 dy（而非 rest）：位置已即时推进
-   *  instant，target 相对位置应增加 rest——用 dy 累加后 diff 自然
-   *  等于「旧未追量 + rest」，否则即时位移会与 rest 抵消导致输入
-   *  丢失（实测 200+200 只滚 300，最终位置少一个 rest）。 */
+  /** 平滑滚动：dy = 目标增量（像素）。容器不可滚/无增量返回 false。 */
   function scrollBy(el, dy) {
     if (!el || !dy || el.scrollHeight <= el.clientHeight + 1) return false;
     var s = getState(el);
-    var instant = dy * INSTANT;
-    // 立即移动一部分——滚轮响应不延迟（v0.6.74 用户反馈"很阻滞"：
-    // 纯指数衰减起始慢+尾部磨蹭）
-    el.scrollTop = clampNum(el.scrollTop + instant, 0, maxTop(el));
-    // 剩余部分进动画目标，平滑收尾
-    if (!s.raf) s.target = el.scrollTop;           // 动画未跑：目标=位置+rest
-    s.target = clampNum(s.target + (s.raf ? dy : dy - instant), 0, maxTop(el));
+    if (!s.raf) {
+      // 动画未跑：以真实滚动位置为基准校准虚拟位置
+      s.pos = el.scrollTop;
+      s.target = el.scrollTop;
+    }
+    s.target = clampNum(s.target + dy, 0, maxTop(el));
     if (!s.raf) {
       var elRef = el, sRef = s;
       s.last = 0;
@@ -3995,8 +3994,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   }
 
   /** dy>0 向下滚（内容上移）；x,y = CSS 像素（相对视口）。
-   *  v0.6.73：平滑滚动（rAF 插值）——滚轮不再硬跳。 */
+   *  v0.6.73：平滑滚动（rAF 插值）——滚轮不再硬跳。
+   *  v0.6.75：标记用户已滚动——app.js 恢复轮询检测到后放弃强制恢复
+   *  （否则加载窗口期滚动被反复拉回旧位置）。 */
   window.__VS_SCROLL__ = function (dy, x, y) {
+    window.__VS_USER_SCROLLING__ = true;
     var target = findScrollable(x, y);
     if (target) {
       if (V.smoothScroll && V.smoothScroll.scrollBy && V.smoothScroll.scrollBy(target, dy)) return;
@@ -20025,7 +20027,6 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       var t0 = Date.now();
       var tryRestore = function () {
         if (scrollState[route.name] !== saved) return;
-        restoreScroll(saved);
         var sc = document.querySelector('.vshell-page');
         var feed = sc && sc.querySelector('.vshell-feed');
         var cur = feed ? feed.scrollTop : (sc ? sc.scrollTop : 0);
@@ -20034,6 +20035,15 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           window.__VS_RESTORE_PATH__ = 'poll';
           reveal();
           calibrate(saved);
+          return;
+        }
+        // v0.6.75：用户在恢复窗口内已滚动（滚轮桥/原生 wheel 标记）——
+        // 放弃恢复，尊重用户当前滚动位置（否则每 300ms 强制拉回 saved
+        // 会打断滚动/平滑动画，实测加载后滚动被反复拽回旧位置）
+        if (window.__VS_USER_SCROLLING__) {
+          delete scrollState[route.name];
+          window.__VS_RESTORE_PATH__ = 'user-scroll';
+          reveal();
           return;
         }
         if (Date.now() - t0 < 3000) setTimeout(tryRestore, 300);
@@ -20355,6 +20365,23 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     // ——确保启动后 --vshell-card-gap/--vshell-card-min 一定在 documentElement 上
     try { if (V.cardGap && V.cardGap.apply) V.cardGap.apply(); } catch (e) { /* noop */ }
     try { if (V.cardSize && V.cardSize.apply) V.cardSize.apply(); } catch (e) { /* noop */ }
+    // v0.6.75：Chromium 可能在 scrollRestoration='manual' 生效前（加载早期）
+    // 恢复过滚动位置（实测新实例加载后 scrollTop=上次会话值 676，恢复窗口
+    // 在加载后 ~1s 内，JS 层面无写入者，patch scrollTop 只抓到自身赋值）——
+    // 延迟到恢复窗口之后（1.5s）再检查重置；scrollState 是内存态，新会话
+    // 无恢复记录 → 重置顶部；同会话返回（有记录）保留。窗口内用户已滚动
+    // （__VS_USER_SCROLLING__，滚轮桥标记）→ 不重置，尊重用户位置。
+    setTimeout(function () {
+      try {
+        if (window.__VS_USER_SCROLLING__) return;
+        var _r = (V.router && V.router.resolve) ? V.router.resolve(location.hash) : null;
+        var _name = _r ? _r.name : null;
+        if (!_name || !scrollState[_name]) {
+          var _sc = document.querySelector('.vshell-page');
+          if (_sc && _sc.scrollTop !== 0) _sc.scrollTop = 0;
+        }
+      } catch (e) { /* noop */ }
+    }, 1500);
   }
 
   /** 启动：插件数据源时先 ensureLoaded（读文件注入适配器）再 boot——
