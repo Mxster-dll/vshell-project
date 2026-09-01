@@ -965,8 +965,13 @@
     if (arr && arr.length) {
       return { kind: 'char', chars: resolveChars(d, arr) };
     }
-    if (d.removedIds[id]) return { kind: 'none' };
+    // v0.6.63：true = 全视频手动移除（无任何角色）；对象 = 按角色免疫
+    // （该角色已从 videoChars 移除，仅阻止重新自动赋予，不拦其他角色）
+    if (d.removedIds[id] === true) return { kind: 'none' };
     var hits = matchTitleOn(d, title);
+    if (d.removedIds[id] && typeof d.removedIds[id] === 'object') {
+      hits = hits.filter(function (h) { return !d.removedIds[id][h.name]; });
+    }
     if (hits.length) {
       d.videoChars[id] = hits.map(function (h) { return h.name; });
       persistFn();
@@ -1039,6 +1044,18 @@
     }) : [];
     names = names.filter(function (n, i, a) { return a.indexOf(n) === i; });
     var oldManual = mNames(d, id) ? mNames(d, id).slice() : [];
+    // v0.6.63：手动名单里出现曾被免疫的角色 → 解除该角色免疫（显式手动
+    // 赋予优先于之前的自动移除标记）；全免疫标记（true）有手动名单时解除
+    if (names.length) {
+      if (d.removedIds[id] === true) d.removedIds[id] = false;
+      if (d.removedIds[id] && typeof d.removedIds[id] === 'object') {
+        var rm0 = d.removedIds[id];
+        names.forEach(function (n) {
+          if (rm0[n]) { delete rm0[n]; }
+        });
+        if (!Object.keys(rm0).length) d.removedIds[id] = false;
+      }
+    }
     var arr = vcArr(d, id);
     var autoNames = [];
     if (arr) {
@@ -1050,7 +1067,7 @@
     });
     if (finalNames.length) {
       d.videoChars[id] = finalNames;
-      if (d.removedIds[id]) d.removedIds[id] = false;
+      if (d.removedIds[id] === true) d.removedIds[id] = false;
     } else {
       delete d.videoChars[id];
       if (oldManual.length) d.removedIds[id] = true;   // 全部取消 = 手动移除
@@ -1113,6 +1130,12 @@
     var vidSrc = (item.sourceId && item.sourceId !== 'local') ? item.sourceId : primaryId();
     var d = dataOf(vidSrc);
     ensureRoleOn(d, vidSrc, name);
+    // v0.6.63：尊重手动移除标记——全视频免疫（true）或该角色免疫（对象
+    // {name:true}）都不再自动赋予；原逻辑无条件清标记导致用户取消的自动
+    // 角色在下次搜索/匹配时被重新加回（用户反馈「取消无效」）
+    var rm = d.removedIds[id];
+    if (rm === true) return false;
+    if (rm && typeof rm === 'object' && rm[name]) return false;
     var arr = vcArr(d, id);
     if (arr) {
       if (arr.indexOf(name) >= 0) return true;      // 已拥有
@@ -1120,7 +1143,6 @@
       arr = d.videoChars[id] = [];
     }
     arr.push(name);
-    if (d.removedIds[id]) d.removedIds[id] = false;
     persistSrcData(vidSrc, d);
     return true;
   }
@@ -1128,6 +1150,30 @@
   /** 冲突解析——v0.6.30 废弃（无冲突概念，一个视频可属多个角色）。
    *  旧调用方（char-picker conflict 弹窗）已删除；保留空实现防外部引用崩。 */
   function resolveConflict() { /* noop */ }
+
+  /** v0.6.63：**取消自动角色**（用户需求：自动添加的角色在修改角色页显示
+   *  为已勾选、可取消）——从 videoChars 移除该角色 + 持久化**按角色免疫**
+   *  标记（removedIds[id] = {name:true}）：之后 assignAuto / charForOn 自动
+   *  匹配都不会再把它加回；手动名单（setManual）出现该角色则解除免疫。
+   *  返回是否真的移除。 */
+  function removeAutoChar(id, name, srcId) {
+    if (!id || !name) return false;
+    var sid = srcId && srcId !== 'local' ? srcId : primaryId();
+    var d = dataOf(sid);
+    var arr = vcArr(d, id);
+    if (!arr) return false;
+    var i = arr.indexOf(name);
+    if (i < 0) return false;
+    arr.splice(i, 1);
+    if (!arr.length) delete d.videoChars[id];
+    var rm = d.removedIds[id];
+    if (rm === true) { /* 全免疫已生效 */ }
+    else if (rm && typeof rm === 'object') { rm[name] = true; }
+    else { d.removedIds[id] = {}; d.removedIds[id][name] = true; }
+    persistSrcData(sid, d);
+    notify();
+    return true;
+  }
 
   /** v0.5.6 第五轮：该视频是否有**手动**角色（manuals 名单非空；
    *  与自动赋予区分——自动角色 = videoChars - manuals）。v0.5.7：srcId 缺省主源 */
@@ -1295,6 +1341,7 @@
     assign: assign,                       // v0.6.30：setManual 薄壳
     assignTo: assignTo,               // v0.5.7 多源：跨源 toggle 手动（缺则建副本）
     assignAuto: assignAuto,           // v0.6.30：自动赋予（搜索/批量，不写快照）
+    removeAutoChar: removeAutoChar,   // v0.6.63：取消自动角色（移除 + 按角色免疫）
     setManual: setManual,             // v0.6.30：整体设置手动名单（弹窗提交）
     resolveConflict: resolveConflict,     // 废弃（空实现兼容）
     isManual: isManual,               // v0.5.6 第五轮：手动名单非空

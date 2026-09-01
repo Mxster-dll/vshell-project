@@ -159,10 +159,12 @@
    *  的 is-conflict 分支）已随多角色改造移除。保留空实现防外部引用崩。 */
   function conflict() { /* noop */ }
 
-  /** 手动更改（草稿模式 v0.5.4；v0.6.30 多角色重构）：
+  /** 手动更改（草稿模式 v0.5.4；v0.6.30 多角色重构；v0.6.63 自动角色可取消）：
    *  - 草稿 = **手动角色名单**（数组，可多选）：点击行 toggle 加入/移出
-   *  - 自动角色（已拥有但不在手动名单）显示灰色「自动」徽标，点击 = 转手动
-   *  - 完成 → setManual(整体提交手动名单)——原自动角色保留不因编辑消失
+   *  - 自动角色（已拥有但不在手动名单）**也显示为已勾选**（is-current），
+   *    灰字 + 「自动」徽标；点击 = 取消（加入 draftRemove，完成时
+   *    removeAutoChar 移除 + 按角色免疫，不再被自动赋予加回）
+   *  - 完成 → setManual(整体提交手动名单) + draftRemove 逐个移除
    *  - 全部取消选中 = 移除全部手动角色（自动角色若存在仍保留）
    *  headTitle 可选（默认'更改角色'；无角色场景传'添加角色'）
    *  v0.5.6 第六轮：按钮文案「还原」→「回退」、「还原角色」→「重置」
@@ -176,6 +178,7 @@
       ? V.characters.getManual(videoId, src) : [];     // 手动名单（打开时）
     var allOwned = V.characters ? V.characters.getChar(videoId, src) : null;  // 全部角色（含自动）
     var draft = currentManual.slice();                 // 草稿（手动名单）
+    var draftRemove = [];                              // v0.6.63：要取消的自动角色（草稿）
     var list = V.utils.el('div', { className: 'vshell-tag-list vshell-char-list' });
 
     function renderList() {
@@ -187,15 +190,31 @@
         return;
       }
       chars.forEach(function (c) {
-        var on = draft.indexOf(c.name) >= 0;
-        var isAuto = allOwned && allOwned.indexOf(c.name) >= 0 && !on;
+        var onManual = draft.indexOf(c.name) >= 0;
+        var isAuto = allOwned && allOwned.indexOf(c.name) >= 0 && !onManual;
+        var willRemove = draftRemove.indexOf(c.name) >= 0;
         var row = charRow(c, function () {
-          // v0.5.4：只改草稿，不 setManual、不退出（v0.6.30 多选 toggle）
-          var i = draft.indexOf(c.name);
-          if (i >= 0) draft.splice(i, 1); else draft.push(c.name);
+          if (onManual) {
+            // 手动勾选行：toggle 移除
+            var i = draft.indexOf(c.name);
+            if (i >= 0) draft.splice(i, 1);
+          } else if (isAuto) {
+            // 自动角色行（已勾选）：toggle 取消（加入/移出 draftRemove）
+            var j = draftRemove.indexOf(c.name);
+            if (j >= 0) draftRemove.splice(j, 1); else draftRemove.push(c.name);
+          } else {
+            // 未拥有行：加入手动名单
+            draft.push(c.name);
+          }
           renderList();
-        }, { title: on ? '取消选中' : (isAuto ? '转为手动角色：' + c.name : '选择角色：' + c.name) });
-        if (on) row.classList.add('is-current');
+        }, {
+          title: onManual ? '取消选中' : (willRemove ? '恢复自动角色：' + c.name
+            : (isAuto ? '取消自动角色：' + c.name : '选择角色：' + c.name)),
+        });
+        // v0.6.63：自动角色也显示**已勾选**（它确实属于该视频）——用户要
+        // 能看到并取消；willRemove 态用红色删除线提示即将移除
+        if (onManual || isAuto) row.classList.add('is-current');
+        if (willRemove) row.classList.add('is-remove');
         if (isAuto) {
           row.classList.add('is-auto');
           row.appendChild(V.utils.el('span', {
@@ -211,16 +230,28 @@
     function applyAndClose() {
       if (!V.characters) { close(); return; }
       var changed = draft.length !== currentManual.length
-        || draft.some(function (n) { return currentManual.indexOf(n) < 0; });
+        || draft.some(function (n) { return currentManual.indexOf(n) < 0; })
+        || draftRemove.length > 0;
       if (changed) {
         V.characters.setManual(videoId, draft, meta, src);
-        V.toast.ok(draft.length ? ('已设置角色：' + draft.join('、')) : '已移除角色');
+        var removed = [];
+        draftRemove.forEach(function (n) {
+          try {
+            if (V.characters.removeAutoChar(videoId, n, src)) removed.push(n);
+          } catch (e) { /* noop */ }
+        });
+        var msg = [];
+        if (draft.length) msg.push('已设置角色：' + draft.join('、'));
+        else if (!removed.length) msg.push('已移除角色');
+        if (removed.length) msg.push('已取消自动角色：' + removed.join('、'));
+        V.toast.ok(msg.join('；'));
       }
       close();
     }
 
     var footBtns = [footBtn('回退', 'vshell-btn-secondary', function () {
       draft = currentManual.slice();   // 放弃草稿：回打开时的手动名单，不保存、不退出
+      draftRemove = [];
       renderList();
     })];
     // v0.5.6 用户需求：去除「移除角色」按钮（想移除 = 点击当前角色行取消选中）

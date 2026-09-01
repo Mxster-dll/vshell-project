@@ -3460,6 +3460,15 @@
 .vshell-char-picker .vshell-char-list .vshell-tag-row.is-auto:hover {
   opacity: 0.9;
 }
+/* v0.6.63：自动角色取消（draftRemove）——红色删除线提示即将移除 */
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-remove {
+  opacity: 0.55;
+}
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-remove .vshell-tag-row-name {
+  color: var(--vscode-errorForeground, #f14c4c);
+  text-decoration: line-through;
+  text-decoration-color: var(--vscode-errorForeground, #f14c4c);
+}
 .vshell-tag-row-auto {
   flex: none;
   margin-left: auto;

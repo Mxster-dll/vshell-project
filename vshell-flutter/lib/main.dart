@@ -108,7 +108,7 @@ Future<void> main(List<String> args) async {
       WebviewShell(
         // 虚拟主机映射（https://app.local → install/web/）：不依赖 http server，
         // 页面/脚本/fixtures 全部由 WebView2 原生映射提供（自包含可分发）
-        url: 'https://app.local/app.html?v=0.6.62',
+        url: 'https://app.local/app.html?v=0.6.63',
         source: AcfunSource(),
         probeDl: args.contains('--probe-dl'),
         probeAbr: args.contains('--probe-abr'),

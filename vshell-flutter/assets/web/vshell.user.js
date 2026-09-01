@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.62
+// @version      0.6.63
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.62';
+window.VShell.version = '0.6.63';
 
 /* vshell 入口见 src/app.js */
 
@@ -2012,8 +2012,13 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (arr && arr.length) {
       return { kind: 'char', chars: resolveChars(d, arr) };
     }
-    if (d.removedIds[id]) return { kind: 'none' };
+    // v0.6.63：true = 全视频手动移除（无任何角色）；对象 = 按角色免疫
+    // （该角色已从 videoChars 移除，仅阻止重新自动赋予，不拦其他角色）
+    if (d.removedIds[id] === true) return { kind: 'none' };
     var hits = matchTitleOn(d, title);
+    if (d.removedIds[id] && typeof d.removedIds[id] === 'object') {
+      hits = hits.filter(function (h) { return !d.removedIds[id][h.name]; });
+    }
     if (hits.length) {
       d.videoChars[id] = hits.map(function (h) { return h.name; });
       persistFn();
@@ -2086,6 +2091,18 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     }) : [];
     names = names.filter(function (n, i, a) { return a.indexOf(n) === i; });
     var oldManual = mNames(d, id) ? mNames(d, id).slice() : [];
+    // v0.6.63：手动名单里出现曾被免疫的角色 → 解除该角色免疫（显式手动
+    // 赋予优先于之前的自动移除标记）；全免疫标记（true）有手动名单时解除
+    if (names.length) {
+      if (d.removedIds[id] === true) d.removedIds[id] = false;
+      if (d.removedIds[id] && typeof d.removedIds[id] === 'object') {
+        var rm0 = d.removedIds[id];
+        names.forEach(function (n) {
+          if (rm0[n]) { delete rm0[n]; }
+        });
+        if (!Object.keys(rm0).length) d.removedIds[id] = false;
+      }
+    }
     var arr = vcArr(d, id);
     var autoNames = [];
     if (arr) {
@@ -2097,7 +2114,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     });
     if (finalNames.length) {
       d.videoChars[id] = finalNames;
-      if (d.removedIds[id]) d.removedIds[id] = false;
+      if (d.removedIds[id] === true) d.removedIds[id] = false;
     } else {
       delete d.videoChars[id];
       if (oldManual.length) d.removedIds[id] = true;   // 全部取消 = 手动移除
@@ -2160,6 +2177,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var vidSrc = (item.sourceId && item.sourceId !== 'local') ? item.sourceId : primaryId();
     var d = dataOf(vidSrc);
     ensureRoleOn(d, vidSrc, name);
+    // v0.6.63：尊重手动移除标记——全视频免疫（true）或该角色免疫（对象
+    // {name:true}）都不再自动赋予；原逻辑无条件清标记导致用户取消的自动
+    // 角色在下次搜索/匹配时被重新加回（用户反馈「取消无效」）
+    var rm = d.removedIds[id];
+    if (rm === true) return false;
+    if (rm && typeof rm === 'object' && rm[name]) return false;
     var arr = vcArr(d, id);
     if (arr) {
       if (arr.indexOf(name) >= 0) return true;      // 已拥有
@@ -2167,7 +2190,6 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       arr = d.videoChars[id] = [];
     }
     arr.push(name);
-    if (d.removedIds[id]) d.removedIds[id] = false;
     persistSrcData(vidSrc, d);
     return true;
   }
@@ -2175,6 +2197,30 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   /** 冲突解析——v0.6.30 废弃（无冲突概念，一个视频可属多个角色）。
    *  旧调用方（char-picker conflict 弹窗）已删除；保留空实现防外部引用崩。 */
   function resolveConflict() { /* noop */ }
+
+  /** v0.6.63：**取消自动角色**（用户需求：自动添加的角色在修改角色页显示
+   *  为已勾选、可取消）——从 videoChars 移除该角色 + 持久化**按角色免疫**
+   *  标记（removedIds[id] = {name:true}）：之后 assignAuto / charForOn 自动
+   *  匹配都不会再把它加回；手动名单（setManual）出现该角色则解除免疫。
+   *  返回是否真的移除。 */
+  function removeAutoChar(id, name, srcId) {
+    if (!id || !name) return false;
+    var sid = srcId && srcId !== 'local' ? srcId : primaryId();
+    var d = dataOf(sid);
+    var arr = vcArr(d, id);
+    if (!arr) return false;
+    var i = arr.indexOf(name);
+    if (i < 0) return false;
+    arr.splice(i, 1);
+    if (!arr.length) delete d.videoChars[id];
+    var rm = d.removedIds[id];
+    if (rm === true) { /* 全免疫已生效 */ }
+    else if (rm && typeof rm === 'object') { rm[name] = true; }
+    else { d.removedIds[id] = {}; d.removedIds[id][name] = true; }
+    persistSrcData(sid, d);
+    notify();
+    return true;
+  }
 
   /** v0.5.6 第五轮：该视频是否有**手动**角色（manuals 名单非空；
    *  与自动赋予区分——自动角色 = videoChars - manuals）。v0.5.7：srcId 缺省主源 */
@@ -2342,6 +2388,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     assign: assign,                       // v0.6.30：setManual 薄壳
     assignTo: assignTo,               // v0.5.7 多源：跨源 toggle 手动（缺则建副本）
     assignAuto: assignAuto,           // v0.6.30：自动赋予（搜索/批量，不写快照）
+    removeAutoChar: removeAutoChar,   // v0.6.63：取消自动角色（移除 + 按角色免疫）
     setManual: setManual,             // v0.6.30：整体设置手动名单（弹窗提交）
     resolveConflict: resolveConflict,     // 废弃（空实现兼容）
     isManual: isManual,               // v0.5.6 第五轮：手动名单非空
@@ -7476,10 +7523,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
    *  的 is-conflict 分支）已随多角色改造移除。保留空实现防外部引用崩。 */
   function conflict() { /* noop */ }
 
-  /** 手动更改（草稿模式 v0.5.4；v0.6.30 多角色重构）：
+  /** 手动更改（草稿模式 v0.5.4；v0.6.30 多角色重构；v0.6.63 自动角色可取消）：
    *  - 草稿 = **手动角色名单**（数组，可多选）：点击行 toggle 加入/移出
-   *  - 自动角色（已拥有但不在手动名单）显示灰色「自动」徽标，点击 = 转手动
-   *  - 完成 → setManual(整体提交手动名单)——原自动角色保留不因编辑消失
+   *  - 自动角色（已拥有但不在手动名单）**也显示为已勾选**（is-current），
+   *    灰字 + 「自动」徽标；点击 = 取消（加入 draftRemove，完成时
+   *    removeAutoChar 移除 + 按角色免疫，不再被自动赋予加回）
+   *  - 完成 → setManual(整体提交手动名单) + draftRemove 逐个移除
    *  - 全部取消选中 = 移除全部手动角色（自动角色若存在仍保留）
    *  headTitle 可选（默认'更改角色'；无角色场景传'添加角色'）
    *  v0.5.6 第六轮：按钮文案「还原」→「回退」、「还原角色」→「重置」
@@ -7493,6 +7542,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       ? V.characters.getManual(videoId, src) : [];     // 手动名单（打开时）
     var allOwned = V.characters ? V.characters.getChar(videoId, src) : null;  // 全部角色（含自动）
     var draft = currentManual.slice();                 // 草稿（手动名单）
+    var draftRemove = [];                              // v0.6.63：要取消的自动角色（草稿）
     var list = V.utils.el('div', { className: 'vshell-tag-list vshell-char-list' });
 
     function renderList() {
@@ -7504,15 +7554,31 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         return;
       }
       chars.forEach(function (c) {
-        var on = draft.indexOf(c.name) >= 0;
-        var isAuto = allOwned && allOwned.indexOf(c.name) >= 0 && !on;
+        var onManual = draft.indexOf(c.name) >= 0;
+        var isAuto = allOwned && allOwned.indexOf(c.name) >= 0 && !onManual;
+        var willRemove = draftRemove.indexOf(c.name) >= 0;
         var row = charRow(c, function () {
-          // v0.5.4：只改草稿，不 setManual、不退出（v0.6.30 多选 toggle）
-          var i = draft.indexOf(c.name);
-          if (i >= 0) draft.splice(i, 1); else draft.push(c.name);
+          if (onManual) {
+            // 手动勾选行：toggle 移除
+            var i = draft.indexOf(c.name);
+            if (i >= 0) draft.splice(i, 1);
+          } else if (isAuto) {
+            // 自动角色行（已勾选）：toggle 取消（加入/移出 draftRemove）
+            var j = draftRemove.indexOf(c.name);
+            if (j >= 0) draftRemove.splice(j, 1); else draftRemove.push(c.name);
+          } else {
+            // 未拥有行：加入手动名单
+            draft.push(c.name);
+          }
           renderList();
-        }, { title: on ? '取消选中' : (isAuto ? '转为手动角色：' + c.name : '选择角色：' + c.name) });
-        if (on) row.classList.add('is-current');
+        }, {
+          title: onManual ? '取消选中' : (willRemove ? '恢复自动角色：' + c.name
+            : (isAuto ? '取消自动角色：' + c.name : '选择角色：' + c.name)),
+        });
+        // v0.6.63：自动角色也显示**已勾选**（它确实属于该视频）——用户要
+        // 能看到并取消；willRemove 态用红色删除线提示即将移除
+        if (onManual || isAuto) row.classList.add('is-current');
+        if (willRemove) row.classList.add('is-remove');
         if (isAuto) {
           row.classList.add('is-auto');
           row.appendChild(V.utils.el('span', {
@@ -7528,16 +7594,28 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     function applyAndClose() {
       if (!V.characters) { close(); return; }
       var changed = draft.length !== currentManual.length
-        || draft.some(function (n) { return currentManual.indexOf(n) < 0; });
+        || draft.some(function (n) { return currentManual.indexOf(n) < 0; })
+        || draftRemove.length > 0;
       if (changed) {
         V.characters.setManual(videoId, draft, meta, src);
-        V.toast.ok(draft.length ? ('已设置角色：' + draft.join('、')) : '已移除角色');
+        var removed = [];
+        draftRemove.forEach(function (n) {
+          try {
+            if (V.characters.removeAutoChar(videoId, n, src)) removed.push(n);
+          } catch (e) { /* noop */ }
+        });
+        var msg = [];
+        if (draft.length) msg.push('已设置角色：' + draft.join('、'));
+        else if (!removed.length) msg.push('已移除角色');
+        if (removed.length) msg.push('已取消自动角色：' + removed.join('、'));
+        V.toast.ok(msg.join('；'));
       }
       close();
     }
 
     var footBtns = [footBtn('回退', 'vshell-btn-secondary', function () {
       draft = currentManual.slice();   // 放弃草稿：回打开时的手动名单，不保存、不退出
+      draftRemove = [];
       renderList();
     })];
     // v0.5.6 用户需求：去除「移除角色」按钮（想移除 = 点击当前角色行取消选中）
@@ -24738,6 +24816,15 @@ html.vshell::-webkit-scrollbar {
 }
 .vshell-char-picker .vshell-char-list .vshell-tag-row.is-auto:hover {
   opacity: 0.9;
+}
+/* v0.6.63：自动角色取消（draftRemove）——红色删除线提示即将移除 */
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-remove {
+  opacity: 0.55;
+}
+.vshell-char-picker .vshell-char-list .vshell-tag-row.is-remove .vshell-tag-row-name {
+  color: var(--vscode-errorForeground, #f14c4c);
+  text-decoration: line-through;
+  text-decoration-color: var(--vscode-errorForeground, #f14c4c);
 }
 .vshell-tag-row-auto {
   flex: none;
