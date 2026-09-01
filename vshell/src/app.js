@@ -485,6 +485,10 @@
     if (switching && V.switchOverlay) {
       setTimeout(function () { V.switchOverlay.hide(); }, 60);
     }
+    // v0.6.69 兜底：CSS 变量（卡片间距/大小）在 boot 完成后再应用一次
+    // ——确保启动后 --vshell-card-gap/--vshell-card-min 一定在 documentElement 上
+    try { if (V.cardGap && V.cardGap.apply) V.cardGap.apply(); } catch (e) { /* noop */ }
+    try { if (V.cardSize && V.cardSize.apply) V.cardSize.apply(); } catch (e) { /* noop */ }
   }
 
   /** 启动：插件数据源时先 ensureLoaded（读文件注入适配器）再 boot——

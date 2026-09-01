@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.68
+// @version      0.6.71
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.68';
+window.VShell.version = '0.6.71';
 
 /* vshell 入口见 src/app.js */
 
@@ -3743,11 +3743,82 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   V.cardGap = {
     /** 当前间距 px（0-24） */
     get: function () { return gap; },
+    /** 重新应用当前值（app.js boot 兜底调用） */
+    apply: apply,
     /** 设置并持久化；同值也重应用（外部 CSS 可能已重置变量） */
     set: function (v) {
       v = clamp(v);
       if (v === gap) { apply(); return; }
       gap = v;
+      apply();
+      persist();
+    },
+    /** 变更监听：onChange(fn) → 注销函数 */
+    onChange: function (fn) {
+      if (typeof fn !== 'function') return function () {};
+      listeners.push(fn);
+      return function () {
+        var i = listeners.indexOf(fn);
+        if (i >= 0) listeners.splice(i, 1);
+      };
+    },
+  };
+})();
+
+
+/* ===== src/core/cardsize.js ===== */
+
+/* ============================================================
+ * cardsize — 视频卡片大小（v0.6.69 用户需求：设置项控制卡片大小）
+ * 拖动条设置「卡片最小宽度」px，驱动 .vshell-wall 网格：
+ *   grid-template-columns: repeat(auto-fill, minmax(var(--vshell-card-min), 1fr))
+ * 宽度下限提高 → 列数更少、每张卡更宽；反之更窄更多列。
+ * 共用 CSS 变量 --vshell-card-min（240-560px，默认 400，步进 10）。
+ * 存储：store 键 'cardSize'。
+ * 即时生效（grid auto-fill 随 CSS 变量变化自动重排，无需 reload）。
+ * ============================================================ */
+(function () {
+  'use strict';
+  var V = window.VShell = window.VShell || {};
+
+  var KEY = 'cardSize';
+  var MIN = 240, MAX = 560, DEF = 400;
+  var size = DEF;
+  var listeners = [];
+
+  function clamp(v) {
+    v = parseInt(v, 10);
+    if (isNaN(v)) return DEF;
+    return Math.min(MAX, Math.max(MIN, v));
+  }
+
+  function apply() {
+    document.documentElement.style.setProperty('--vshell-card-min', size + 'px');
+  }
+
+  try {
+    var saved = V.store.get(KEY);
+    if (saved !== null && saved !== undefined && saved !== '') {
+      size = clamp(saved);
+    }
+  } catch (e) { /* noop */ }
+  apply();
+
+  function persist() {
+    try { V.store.set(KEY, size); } catch (e) { /* noop */ }
+    listeners.forEach(function (fn) { try { fn(size); } catch (e) { /* noop */ } });
+  }
+
+  V.cardSize = {
+    /** 当前卡片最小宽度 px（240-560） */
+    get: function () { return size; },
+    /** 重新应用当前值（app.js boot 兜底调用——确保启动后变量在位上） */
+    apply: apply,
+    /** 设置并持久化；同值也重应用（外部 CSS 可能已重置变量） */
+    set: function (v) {
+      v = clamp(v);
+      if (v === size) { apply(); return; }
+      size = v;
       apply();
       persist();
     },
@@ -4924,12 +4995,16 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   }
 
   /** 页容量 a 估算：视口高 ÷ 卡片行高 × 每行卡数（至少 4）。
-   *  卡片高约 200 逻辑px；宽 <768 单列，<1440 双列，否则 3 列。 */
+   *  卡片高约 宽×9/16 + 60 标题区（v0.6.69 起随卡片大小设置联动）；
+   *  宽 <768 单列，<1440 双列，否则 3 列。 */
   function pageCapacity() {
     var vw = window.innerWidth || 1440;
     var vh = window.innerHeight || 900;
+    var cardMin = (V.cardSize && typeof V.cardSize.get === 'function')
+      ? V.cardSize.get() : 400;
+    var rowH = Math.round(cardMin * 9 / 16 + 60);
     var cols = vw < 768 ? 1 : (vw < 1440 ? 2 : 3);
-    var rows = Math.max(1, Math.ceil(vh / 210));
+    var rows = Math.max(1, Math.ceil(vh / rowH));
     return Math.max(4, rows * cols);
   }
 
@@ -19175,6 +19250,34 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           '视频卡片间距与分类卡片下边距'));
       return wrap;
     })()));
+    // 卡片大小（v0.6.69 用户需求：拖动条控制卡片最小宽度；即时生效
+    // ——grid auto-fill 随 --vshell-card-min 变化自动重排）
+    body.appendChild(sec('卡片大小', (function () {
+      var wrap = V.utils.el('div', { className: 'vshell-settings-slider' });
+      var cur = V.cardSize ? V.cardSize.get() : 400;
+      var valEl = V.utils.el('span', { className: 'vshell-settings-slider-val' },
+          cur + 'px');
+      var range = V.utils.el('input', {
+        type: 'range',
+        min: 240,
+        max: 560,
+        step: 10,
+        className: 'vshell-settings-range',
+        value: String(cur),
+        'aria-label': '卡片大小',
+      });
+      range.addEventListener('input', function () {
+        if (!V.cardSize) return;
+        var v = parseInt(range.value, 10);
+        V.cardSize.set(v);
+        valEl.textContent = v + 'px';
+      });
+      wrap.appendChild(range);
+      wrap.appendChild(valEl);
+      wrap.appendChild(V.utils.el('div', { className: 'vshell-settings-slider-hint' },
+          '视频卡片最小宽度（越大每行卡片越少）'));
+      return wrap;
+    })()));
     // 数据源（v0.5.10 独立化：**无内置数据源**——acfun/bilibili 也是插件
     // 文件，由用户「添加数据源」手动注册；本区只渲染注册表行）。
     // v0.5.7 多源（用户需求）：**多选启用**（checkbox）——勾选 = 启用集
@@ -20059,6 +20162,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (switching && V.switchOverlay) {
       setTimeout(function () { V.switchOverlay.hide(); }, 60);
     }
+    // v0.6.69 兜底：CSS 变量（卡片间距/大小）在 boot 完成后再应用一次
+    // ——确保启动后 --vshell-card-gap/--vshell-card-min 一定在 documentElement 上
+    try { if (V.cardGap && V.cardGap.apply) V.cardGap.apply(); } catch (e) { /* noop */ }
+    try { if (V.cardSize && V.cardSize.apply) V.cardSize.apply(); } catch (e) { /* noop */ }
   }
 
   /** 启动：插件数据源时先 ensureLoaded（读文件注入适配器）再 boot——
@@ -22838,9 +22945,10 @@ html.vshell::-webkit-scrollbar {
 /* ---------- 视频墙 ---------- */
 .vshell-wall {
   display: grid;
-  /* 卡片加大（用户需求）：墙容器宽度不变，只把卡片下限提高 → 更少列、每张更宽
-     400px 下限：1440 屏 3 列 ~466px、1920 屏 4 列 ~468px、1280 屏 3 列 ~413px */
-  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  /* 卡片大小（v0.6.69 用户需求：设置项控制）：--vshell-card-min 由
+     cardsize.js 设置（240-560px，默认 400）。400px 下限：1440 屏 3 列
+     ~466px、1920 屏 4 列 ~468px、1280 屏 3 列 ~413px */
+  grid-template-columns: repeat(auto-fill, minmax(var(--vshell-card-min, 400px), 1fr));
   gap: var(--vshell-card-gap, 6px);   /* v0.5.6 用户需求：卡片间距拖动条（cardgap.js 设置变量） */
   padding: 0 0 8px;      /* 上下左右 padding 取消（用户需求），仅留底部呼吸 */
 }
@@ -26931,7 +27039,7 @@ body.vshell-dragging a { pointer-events: none; }
     overflow: visible;                  /* 相关列表不再独立滚动，随页面滚动 */
   }
   .vshell-wall {
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(var(--vshell-card-min, 240px), 1fr));
     gap: var(--vshell-card-gap, 6px);
   }
   .vshell-nav-search {
@@ -27038,7 +27146,7 @@ body.vshell-dragging a { pointer-events: none; }
     padding: 0 8px;
   }
   .vshell-wall {
-    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(var(--vshell-card-min, 170px), 1fr));
     gap: var(--vshell-card-gap, 6px);
   }
   .vshell-detail-title {

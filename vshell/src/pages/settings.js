@@ -148,6 +148,34 @@
           '视频卡片间距与分类卡片下边距'));
       return wrap;
     })()));
+    // 卡片大小（v0.6.69 用户需求：拖动条控制卡片最小宽度；即时生效
+    // ——grid auto-fill 随 --vshell-card-min 变化自动重排）
+    body.appendChild(sec('卡片大小', (function () {
+      var wrap = V.utils.el('div', { className: 'vshell-settings-slider' });
+      var cur = V.cardSize ? V.cardSize.get() : 400;
+      var valEl = V.utils.el('span', { className: 'vshell-settings-slider-val' },
+          cur + 'px');
+      var range = V.utils.el('input', {
+        type: 'range',
+        min: 240,
+        max: 560,
+        step: 10,
+        className: 'vshell-settings-range',
+        value: String(cur),
+        'aria-label': '卡片大小',
+      });
+      range.addEventListener('input', function () {
+        if (!V.cardSize) return;
+        var v = parseInt(range.value, 10);
+        V.cardSize.set(v);
+        valEl.textContent = v + 'px';
+      });
+      wrap.appendChild(range);
+      wrap.appendChild(valEl);
+      wrap.appendChild(V.utils.el('div', { className: 'vshell-settings-slider-hint' },
+          '视频卡片最小宽度（越大每行卡片越少）'));
+      return wrap;
+    })()));
     // 数据源（v0.5.10 独立化：**无内置数据源**——acfun/bilibili 也是插件
     // 文件，由用户「添加数据源」手动注册；本区只渲染注册表行）。
     // v0.5.7 多源（用户需求）：**多选启用**（checkbox）——勾选 = 启用集

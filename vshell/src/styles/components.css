@@ -1180,9 +1180,10 @@
 /* ---------- 视频墙 ---------- */
 .vshell-wall {
   display: grid;
-  /* 卡片加大（用户需求）：墙容器宽度不变，只把卡片下限提高 → 更少列、每张更宽
-     400px 下限：1440 屏 3 列 ~466px、1920 屏 4 列 ~468px、1280 屏 3 列 ~413px */
-  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  /* 卡片大小（v0.6.69 用户需求：设置项控制）：--vshell-card-min 由
+     cardsize.js 设置（240-560px，默认 400）。400px 下限：1440 屏 3 列
+     ~466px、1920 屏 4 列 ~468px、1280 屏 3 列 ~413px */
+  grid-template-columns: repeat(auto-fill, minmax(var(--vshell-card-min, 400px), 1fr));
   gap: var(--vshell-card-gap, 6px);   /* v0.5.6 用户需求：卡片间距拖动条（cardgap.js 设置变量） */
   padding: 0 0 8px;      /* 上下左右 padding 取消（用户需求），仅留底部呼吸 */
 }

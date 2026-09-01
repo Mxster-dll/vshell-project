@@ -33,7 +33,7 @@
     overflow: visible;                  /* 相关列表不再独立滚动，随页面滚动 */
   }
   .vshell-wall {
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(var(--vshell-card-min, 240px), 1fr));
     gap: var(--vshell-card-gap, 6px);
   }
   .vshell-nav-search {
@@ -140,7 +140,7 @@
     padding: 0 8px;
   }
   .vshell-wall {
-    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(var(--vshell-card-min, 170px), 1fr));
     gap: var(--vshell-card-gap, 6px);
   }
   .vshell-detail-title {

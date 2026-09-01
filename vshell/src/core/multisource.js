@@ -106,12 +106,16 @@
   }
 
   /** 页容量 a 估算：视口高 ÷ 卡片行高 × 每行卡数（至少 4）。
-   *  卡片高约 200 逻辑px；宽 <768 单列，<1440 双列，否则 3 列。 */
+   *  卡片高约 宽×9/16 + 60 标题区（v0.6.69 起随卡片大小设置联动）；
+   *  宽 <768 单列，<1440 双列，否则 3 列。 */
   function pageCapacity() {
     var vw = window.innerWidth || 1440;
     var vh = window.innerHeight || 900;
+    var cardMin = (V.cardSize && typeof V.cardSize.get === 'function')
+      ? V.cardSize.get() : 400;
+    var rowH = Math.round(cardMin * 9 / 16 + 60);
     var cols = vw < 768 ? 1 : (vw < 1440 ? 2 : 3);
-    var rows = Math.max(1, Math.ceil(vh / 210));
+    var rows = Math.max(1, Math.ceil(vh / rowH));
     return Math.max(4, rows * cols);
   }
 

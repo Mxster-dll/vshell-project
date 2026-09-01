@@ -41,6 +41,8 @@
   V.cardGap = {
     /** 当前间距 px（0-24） */
     get: function () { return gap; },
+    /** 重新应用当前值（app.js boot 兜底调用） */
+    apply: apply,
     /** 设置并持久化；同值也重应用（外部 CSS 可能已重置变量） */
     set: function (v) {
       v = clamp(v);
