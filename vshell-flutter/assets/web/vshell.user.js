@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.79
+// @version      0.6.80
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.79';
+window.VShell.version = '0.6.80';
 
 /* vshell 入口见 src/app.js */
 
@@ -3903,6 +3903,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   // 时速度平滑过渡（无抖动）。JERK=120000px/s³：单格 60px 的稳态加速度
   // 7200px/s² 需 60ms 达到——起步/追加柔和，又不迟钝。
   var JERK = 120000;
+  // v0.6.80 速度上限（terminal velocity）：用户反馈"还是会突然加速"——
+  // 弹簧模型下连续追加滚动 target 持续前移 → 加速度持续累积 → 速度无限
+  // 增长（越滚越快）。速度钳制在 MAXV，快速滚动时匀速（像原生滚轮），
+  // 不再无限加速；接近 target 时弹簧自然减速停下。
+  var MAXV = 2400;   // 最大滚动速度 px/s（≈ 快速拨动滚轮的速度）
 
   function tick(el, s, now) {
     var dt;
@@ -3918,9 +3923,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (dA > maxDelta) dA = maxDelta;
     else if (dA < -maxDelta) dA = -maxDelta;
     s.accel += dA;
-    // 2) 积分：加速度 → 速度（阻尼指数衰减）
+    // 2) 积分：加速度 → 速度（阻尼指数衰减 + 速度上限防无限加速）
     s.vel += s.accel * dtS;
     s.vel *= Math.exp(-DAMP * dtS);
+    if (s.vel > MAXV) { s.vel = MAXV; if (s.accel > 0) s.accel = 0; }      // 顶速：停推（防解除瞬间再冲）
+    else if (s.vel < -MAXV) { s.vel = -MAXV; if (s.accel < 0) s.accel = 0; }
     // 3) 积分：速度 → 位置
     s.pos += s.vel * dtS;
     el.scrollTop = s.pos;
