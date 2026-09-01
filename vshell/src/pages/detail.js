@@ -958,6 +958,33 @@
       tlRows[key] = { track: row.querySelector('.vshell-tl-track') };
       return row;
     }
+    // v0.6.96 悬停进度条 → 三条时间轴对应位置竖线（挂在 row 上——renderSegs
+    // 只清 track，竖线不受区间重绘影响；row 与 track 同宽，pct 直接可对齐）
+    function showTimelineHover(pct) {
+      if (!tlRows) return;
+      var key;
+      for (key in tlRows) {
+        var row = tlRows[key].track.parentNode;
+        if (!row) continue;
+        var line = row.querySelector('.vshell-tl-hover-line');
+        if (!line) {
+          line = document.createElement('div');
+          line.className = 'vshell-tl-hover-line';
+          row.appendChild(line);
+        }
+        line.style.left = pct + '%';
+      }
+    }
+    function hideTimelineHover() {
+      if (!tlRows) return;
+      var key;
+      for (key in tlRows) {
+        var row = tlRows[key].track.parentNode;
+        if (!row) continue;
+        var line = row.querySelector('.vshell-tl-hover-line');
+        if (line) line.remove();
+      }
+    }
     function legendItem(label, key) {
       return V.utils.el('span', { className: 'vshell-tl-legend-item vshell-tl-legend-' + key }, [
         V.utils.el('span', { className: 'vshell-tl-legend-swatch' }),
@@ -1055,6 +1082,13 @@
         ]),
       ]);
       tlVideo = player && player.video;
+      // v0.6.96 悬停进度条 → 三条时间轴对应位置竖线（不需要 video 就绪）
+      if (player && player.onBarHover) {
+        player.onBarHover(function (pct) {
+          if (pct === null) hideTimelineHover();
+          else showTimelineHover(pct);
+        });
+      }
       if (!tlVideo) return;
       // 播放历史会话段：play/timeupdate 延伸，pause/seeked/ended 闭合落盘。
       // seek 跳转：timeupdate 会在 seeked 前用新 currentTime 触发——若直接

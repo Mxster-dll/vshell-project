@@ -738,6 +738,20 @@
       pause: function () { video.pause(); },
       stop: function () { video.pause(); video.removeAttribute('src'); video.load(); destroyDash(); destroyHls(); },
       get playing() { return state.playing; },
+      // v0.6.96 进度条悬停通知（非拖动）：cb(pct) 0-100 / 移出 cb(null)
+      onBarHover: function (cb) {
+        var cur = null;
+        bar.addEventListener('pointermove', function (e) {
+          if (barDragging) return;
+          var r = bar.getBoundingClientRect();
+          if (!r.width) return;
+          var pct = Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100));
+          if (pct !== cur) { cur = pct; if (cb) cb(pct); }
+        });
+        bar.addEventListener('pointerleave', function () {
+          if (cur !== null) { cur = null; if (cb) cb(null); }
+        });
+      },
       destroy: function () {
         hideSeekPrev();
         if (prevVideo) { try { prevVideo.remove(); } catch (e) { /* noop */ } prevVideo = null; }

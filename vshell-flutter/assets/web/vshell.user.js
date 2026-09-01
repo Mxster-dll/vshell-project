@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.95
+// @version      0.6.96
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.95';
+window.VShell.version = '0.6.96';
 
 /* vshell 入口见 src/app.js */
 
@@ -11042,6 +11042,20 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       pause: function () { video.pause(); },
       stop: function () { video.pause(); video.removeAttribute('src'); video.load(); destroyDash(); destroyHls(); },
       get playing() { return state.playing; },
+      // v0.6.96 进度条悬停通知（非拖动）：cb(pct) 0-100 / 移出 cb(null)
+      onBarHover: function (cb) {
+        var cur = null;
+        bar.addEventListener('pointermove', function (e) {
+          if (barDragging) return;
+          var r = bar.getBoundingClientRect();
+          if (!r.width) return;
+          var pct = Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100));
+          if (pct !== cur) { cur = pct; if (cb) cb(pct); }
+        });
+        bar.addEventListener('pointerleave', function () {
+          if (cur !== null) { cur = null; if (cb) cb(null); }
+        });
+      },
       destroy: function () {
         hideSeekPrev();
         if (prevVideo) { try { prevVideo.remove(); } catch (e) { /* noop */ } prevVideo = null; }
@@ -16435,6 +16449,33 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       tlRows[key] = { track: row.querySelector('.vshell-tl-track') };
       return row;
     }
+    // v0.6.96 悬停进度条 → 三条时间轴对应位置竖线（挂在 row 上——renderSegs
+    // 只清 track，竖线不受区间重绘影响；row 与 track 同宽，pct 直接可对齐）
+    function showTimelineHover(pct) {
+      if (!tlRows) return;
+      var key;
+      for (key in tlRows) {
+        var row = tlRows[key].track.parentNode;
+        if (!row) continue;
+        var line = row.querySelector('.vshell-tl-hover-line');
+        if (!line) {
+          line = document.createElement('div');
+          line.className = 'vshell-tl-hover-line';
+          row.appendChild(line);
+        }
+        line.style.left = pct + '%';
+      }
+    }
+    function hideTimelineHover() {
+      if (!tlRows) return;
+      var key;
+      for (key in tlRows) {
+        var row = tlRows[key].track.parentNode;
+        if (!row) continue;
+        var line = row.querySelector('.vshell-tl-hover-line');
+        if (line) line.remove();
+      }
+    }
     function legendItem(label, key) {
       return V.utils.el('span', { className: 'vshell-tl-legend-item vshell-tl-legend-' + key }, [
         V.utils.el('span', { className: 'vshell-tl-legend-swatch' }),
@@ -16532,6 +16573,13 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         ]),
       ]);
       tlVideo = player && player.video;
+      // v0.6.96 悬停进度条 → 三条时间轴对应位置竖线（不需要 video 就绪）
+      if (player && player.onBarHover) {
+        player.onBarHover(function (pct) {
+          if (pct === null) hideTimelineHover();
+          else showTimelineHover(pct);
+        });
+      }
       if (!tlVideo) return;
       // 播放历史会话段：play/timeupdate 延伸，pause/seeked/ended 闭合落盘。
       // seek 跳转：timeupdate 会在 seeked 前用新 currentTime 触发——若直接
@@ -27102,6 +27150,17 @@ body.vshell-dragging a { pointer-events: none; }
   top: 0;
   bottom: 0;
   border-radius: 0; /* v0.6.94 用户需求：区间无圆角 */
+}
+/* v0.6.96 悬停进度条 → 时间轴对应位置竖线（挂在 row 上，不受 track 重绘影响） */
+.vshell .vshell-tl-hover-line {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  margin-left: -0.5px;
+  background: var(--vscode-foreground, #cccccc);
+  pointer-events: none;
+  z-index: 2;
 }
 /* 行配色：已缓存=亮蓝 / 已分镜识别=紫 / 已播=绿
    v0.6.92 缓存色加亮（原深蓝 0e639c 在暗轨上接近灰色，用户误认） */

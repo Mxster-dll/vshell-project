@@ -836,6 +836,17 @@
   bottom: 0;
   border-radius: 0; /* v0.6.94 用户需求：区间无圆角 */
 }
+/* v0.6.96 悬停进度条 → 时间轴对应位置竖线（挂在 row 上，不受 track 重绘影响） */
+.vshell .vshell-tl-hover-line {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  margin-left: -0.5px;
+  background: var(--vscode-foreground, #cccccc);
+  pointer-events: none;
+  z-index: 2;
+}
 /* 行配色：已缓存=亮蓝 / 已分镜识别=紫 / 已播=绿
    v0.6.92 缓存色加亮（原深蓝 0e639c 在暗轨上接近灰色，用户误认） */
 .vshell .vshell-tl-row:nth-child(1) .vshell-tl-seg { background: var(--vscode-textLink-foreground, #4fc1ff); }
