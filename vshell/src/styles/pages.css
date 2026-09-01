@@ -826,8 +826,8 @@
   position: relative;
   flex: 1;
   height: 5px;
-  border-radius: 3px;
-  background: var(--vscode-progressBar-background, rgba(255, 255, 255, 0.08));
+  /* v0.6.95 用户需求：去除轨道背景（原 progressBar-background 蓝色），只显示区间段 */
+  background: transparent;
   overflow: hidden;
 }
 .vshell .vshell-tl-seg {
