@@ -834,7 +834,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  border-radius: 3px;
+  border-radius: 0; /* v0.6.94 用户需求：区间无圆角 */
 }
 /* 行配色：已缓存=亮蓝 / 已分镜识别=紫 / 已播=绿
    v0.6.92 缓存色加亮（原深蓝 0e639c 在暗轨上接近灰色，用户误认） */

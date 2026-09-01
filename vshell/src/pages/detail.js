@@ -976,7 +976,11 @@
         var s = Math.max(0, r.s), e = Math.min(dur, r.e);
         if (e <= s + 0.05) return;
         el.style.left = ((s / dur) * 100).toFixed(2) + '%';
-        el.style.width = Math.max(1.5, ((e - s) / dur) * 100).toFixed(2) + '%';
+        // v0.6.94 最小显示宽度 = 1px（按轨道实际像素宽动态换算百分比）
+        var pct = ((e - s) / dur) * 100;
+        var trackW = track.clientWidth || 300;
+        var minPct = Math.max(0, (1 / trackW) * 100);
+        el.style.width = Math.max(minPct, pct).toFixed(3) + '%';
         el.title = V.utils.fmtTime(s) + ' — ' + V.utils.fmtTime(e);
         track.appendChild(el);
       });

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.93
+// @version      0.6.94
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.93';
+window.VShell.version = '0.6.94';
 
 /* vshell 入口见 src/app.js */
 
@@ -16453,7 +16453,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         var s = Math.max(0, r.s), e = Math.min(dur, r.e);
         if (e <= s + 0.05) return;
         el.style.left = ((s / dur) * 100).toFixed(2) + '%';
-        el.style.width = Math.max(1.5, ((e - s) / dur) * 100).toFixed(2) + '%';
+        // v0.6.94 最小显示宽度 = 1px（按轨道实际像素宽动态换算百分比）
+        var pct = ((e - s) / dur) * 100;
+        var trackW = track.clientWidth || 300;
+        var minPct = Math.max(0, (1 / trackW) * 100);
+        el.style.width = Math.max(minPct, pct).toFixed(3) + '%';
         el.title = V.utils.fmtTime(s) + ' — ' + V.utils.fmtTime(e);
         track.appendChild(el);
       });
@@ -27097,7 +27101,7 @@ body.vshell-dragging a { pointer-events: none; }
   position: absolute;
   top: 0;
   bottom: 0;
-  border-radius: 3px;
+  border-radius: 0; /* v0.6.94 用户需求：区间无圆角 */
 }
 /* 行配色：已缓存=亮蓝 / 已分镜识别=紫 / 已播=绿
    v0.6.92 缓存色加亮（原深蓝 0e639c 在暗轨上接近灰色，用户误认） */
