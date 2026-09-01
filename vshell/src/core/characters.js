@@ -52,6 +52,10 @@
                                     // 重置角色）入表；表内视频**不再被自动管理**
                                     // （搜索/匹配不自动赋予角色）。角色页 =
                                     // 表内当前角色（段1）+ 剔除表内后的自动搜索（段2）
+  var REX_KEY = 'charRoleExcludes'; // v0.6.65：{角色名: {id: true}} **角色级排除表**
+                                    // ——角色页悬停卡排除某视频：从该视频角色列表
+                                    // 剔除当前角色 + 自动管理不再加回 + 段2 搜索
+                                    // 剔除。**不算手动管理**（不进 manManaged 表）
 
   /** 数据源作用域键：v0.5.6 用户需求——角色/赋值/代表作等按数据源隔离
    *  （vshell.characters.acfun / vshell.videoChars.bilibili / ...）
@@ -67,6 +71,7 @@
   var follows = {};                 // {roleName: true}（关注集合，v0.5.6 第十一轮）
   var removedIds = {};              // {id: true}（手动移除标记，v0.5.6 第二十七轮）
   var managed = {};                 // {id: true}（v0.6.64 手动管理视频表——主源内存态）
+  var roleExcludes = {};            // {角色名: {id: true}}（v0.6.65 角色级排除表——主源内存态）
   var listeners = [];
 
   function normalize(t) {
@@ -216,6 +221,11 @@
       if (mm && typeof mm === 'object' && !Array.isArray(mm)) managed = mm;
       else managed = {};
     } catch (e) { /* noop */ }
+    try {
+      var re = V.store.get(sk(REX_KEY));
+      if (re && typeof re === 'object' && !Array.isArray(re)) roleExcludes = re;
+      else roleExcludes = {};
+    } catch (e) { /* noop */ }
   }
 
   loadAll();
@@ -237,6 +247,7 @@
       fl: V.store.scopedKey(FKEY, srcId),
       rm: V.store.scopedKey(RKEY, srcId),
       mm: V.store.scopedKey(MAN_KEY, srcId),
+      re: V.store.scopedKey(REX_KEY, srcId),
     };
   }
   function srcDataOf(srcId) {
@@ -244,7 +255,7 @@
     var k = srcKeys(srcId);
     var d = {
       chars: [], videoChars: {}, conflicts: {}, locks: {}, manuals: {},
-      charVideos: {}, follows: {}, removedIds: {}, managed: {},
+      charVideos: {}, follows: {}, removedIds: {}, managed: {}, roleExcludes: {},
     };
     try {
       var saved = V.store.get(k.chars);
@@ -269,6 +280,10 @@
     try {
       var mm = V.store.get(k.mm);
       if (mm && typeof mm === 'object' && !Array.isArray(mm)) d.managed = mm;
+    } catch (e) { /* noop */ }
+    try {
+      var re = V.store.get(k.re);
+      if (re && typeof re === 'object' && !Array.isArray(re)) d.roleExcludes = re;
     } catch (e) { /* noop */ }
     srcCache[srcId] = d;
     return d;
@@ -302,7 +317,7 @@
     return {
       chars: chars, videoChars: videoChars, conflicts: conflicts, locks: locks,
       manuals: manuals, charVideos: charVideos, follows: follows, removedIds: removedIds,
-      managed: managed,
+      managed: managed, roleExcludes: roleExcludes,
     };
   }
   function dataOf(srcId) {
@@ -476,6 +491,17 @@
     });
     if (d.charVideos[name]) { delete d.charVideos[name]; dirty = true; }   // 角色主页数据
     if (d.follows[name]) { delete d.follows[name]; dirty = true; }         // 关注
+    // v0.6.65：角色删除 → 全源清理该角色的排除表条目（角色已不存在，
+    // 排除记录失去意义）
+    var reIds = srcIds();
+    reIds.forEach(function (reId) {
+      var rd = dataOf(reId);
+      if (rd.roleExcludes && rd.roleExcludes[name]) {
+        delete rd.roleExcludes[name];
+        if (reId === sid) dirty = true;
+        persistSrcData(reId, rd);
+      }
+    });
     persistSrcData(sid, d);
     if (dirty) notify();
     return true;
@@ -540,6 +566,17 @@
       delete d.follows[oldName];
       dirty = true;
     }
+    // v0.6.65：排除表全源迁移（角色改名 → 排除记录跟随新名）
+    var reIds = srcIds();
+    reIds.forEach(function (reId) {
+      var rd = dataOf(reId);
+      if (rd.roleExcludes && rd.roleExcludes[oldName]) {
+        rd.roleExcludes[nn] = rd.roleExcludes[oldName];
+        delete rd.roleExcludes[oldName];
+        if (reId === sid) dirty = true;
+        persistSrcData(reId, rd);
+      }
+    });
     persistSrcData(sid, d);
     if (dirty) notify();
     return true;
@@ -904,6 +941,7 @@
       V.store.set(k.fl, d.follows);
       V.store.set(k.rm, d.removedIds);
       V.store.set(k.mm, d.managed);
+      V.store.set(k.re, d.roleExcludes);
     } catch (e) { /* noop */ }
     invalidateSrc(srcId);
   }
@@ -988,6 +1026,12 @@
     // （该角色已从 videoChars 移除，仅阻止重新自动赋予，不拦其他角色）
     if (d.removedIds[id] === true) return { kind: 'none' };
     var hits = matchTitleOn(d, title);
+    // v0.6.65：角色级排除——被排除的角色不自动赋予该视频
+    if (d.roleExcludes) {
+      hits = hits.filter(function (h) {
+        return !(d.roleExcludes[h.name] && d.roleExcludes[h.name][id]);
+      });
+    }
     if (d.removedIds[id] && typeof d.removedIds[id] === 'object') {
       hits = hits.filter(function (h) { return !d.removedIds[id][h.name]; });
     }
@@ -1155,6 +1199,9 @@
     // v0.6.64：**手动管理表**——用户手动操作过角色的视频不再自动赋予
     // （视频级标记；取代 v0.6.63 的角色级免疫，语义更强）
     if (d.managed[id]) return false;
+    // v0.6.65：**角色级排除**——角色页排除过的视频不再自动赋予该角色
+    // （不算手动管理；按（角色,源,id）记录）
+    if (d.roleExcludes && d.roleExcludes[name] && d.roleExcludes[name][id]) return false;
     // v0.6.63：尊重手动移除标记——全视频免疫（true）或该角色免疫（对象
     // {name:true}）都不再自动赋予；原逻辑无条件清标记导致用户取消的自动
     // 角色在下次搜索/匹配时被重新加回（用户反馈「取消无效」）
@@ -1216,6 +1263,83 @@
     if (!srcId) return [];
     var d = dataOf(srcId);
     return d.managed ? Object.keys(d.managed) : [];
+  }
+
+  /* ---------- v0.6.65 角色级排除表 ---------- */
+
+  /** 某源某角色是否排除某视频（排除 = 该角色不再自动赋予该视频 +
+   *  从角色列表剔除；**不算手动管理**，不进 manManaged 表） */
+  function isRoleExcluded(name, srcId, id) {
+    if (!name || !id) return false;
+    var sid = srcId && srcId !== 'local' ? srcId : primaryId();
+    var d = dataOf(sid);
+    return !!(d.roleExcludes && d.roleExcludes[name] && d.roleExcludes[name][id]);
+  }
+
+  /** 该角色在某源排除的视频 id 数组（角色页段2 剔除 / 段1 过滤用） */
+  function roleExcludedIds(name, srcId) {
+    if (!name || !srcId) return [];
+    var d = dataOf(srcId);
+    if (!d.roleExcludes || !d.roleExcludes[name]) return [];
+    return Object.keys(d.roleExcludes[name]);
+  }
+
+  /** 设置/清除角色级排除（excl=true 排除；false/undefined 恢复）。
+   *  只写排除表（+persist+notify），**不碰** videoChars/manuals——
+   *  调用方（角色页悬停按钮）先 removeRoleFromVideo 剔除角色再调此函数 */
+  function setRoleExcluded(name, srcId, id, excl) {
+    if (!name || !id) return false;
+    var sid = srcId && srcId !== 'local' ? srcId : primaryId();
+    var d = dataOf(sid);
+    var re = d.roleExcludes || (d.roleExcludes = {});
+    var per = re[name] || (re[name] = {});
+    if (excl) per[id] = true;
+    else {
+      delete per[id];
+      if (!Object.keys(per).length) delete re[name];
+    }
+    persistSrcData(sid, d);
+    notify();
+    return true;
+  }
+
+  /** 从某视频的**角色列表**剔除指定角色（videoChars 数组移除 + 手动名单
+   *  移除 + charVideos 快照移除）。**不标记手动管理**（v0.6.65 语义：
+   *  角色页排除不算手动管理，不进 manManaged 表——之后的自动匹配由
+   *  排除表单独拦截）。返回是否真的移除。 */
+  function removeRoleFromVideo(id, srcId, roleName) {
+    if (!id || !roleName) return false;
+    var sid = srcId && srcId !== 'local' ? srcId : primaryId();
+    var d = dataOf(sid);
+    var dirty = false;
+    var arr = vcArr(d, id);
+    if (arr && arr.indexOf(roleName) >= 0) {
+      arr = arr.filter(function (x) { return x !== roleName; });
+      if (arr.length) d.videoChars[id] = arr; else delete d.videoChars[id];
+      dirty = true;
+    }
+    var mn = mNames(d, id);
+    if (mn && mn.indexOf(roleName) >= 0) {
+      mn = mn.filter(function (x) { return x !== roleName; });
+      if (mn.length) d.manuals[id] = { names: mn, at: d.manuals[id].at || Date.now() };
+      else delete d.manuals[id];
+      dirty = true;
+    }
+    if (d.charVideos && d.charVideos[roleName] && Array.isArray(d.charVideos[roleName])) {
+      var before = d.charVideos[roleName].length;
+      d.charVideos[roleName] = d.charVideos[roleName].filter(function (m) {
+        return !m || m.id !== id;
+      });
+      if (d.charVideos[roleName].length !== before) {
+        if (!d.charVideos[roleName].length) delete d.charVideos[roleName];
+        dirty = true;
+      }
+    }
+    if (dirty) {
+      persistSrcData(sid, d);
+      notify();
+    }
+    return dirty;
   }
 
   /** v0.5.6 第五轮：该视频是否有**手动**角色（manuals 名单非空；
@@ -1391,6 +1515,10 @@
     removeAutoChar: removeAutoChar,   // v0.6.63：取消自动角色（移除 + 入手动管理表）
     isManaged: isManaged,             // v0.6.64：视频是否手动管理过（表内）
     listManaged: listManaged,         // v0.6.64：手动管理表内视频 id 数组（按源）
+    isRoleExcluded: isRoleExcluded,   // v0.6.65：角色级排除（角色名,源,id）
+    roleExcludedIds: roleExcludedIds, // v0.6.65：某角色在某源排除的视频 id 数组
+    setRoleExcluded: setRoleExcluded, // v0.6.65：设置/清除角色级排除
+    removeRoleFromVideo: removeRoleFromVideo, // v0.6.65：从视频角色列表剔除角色（不算手动管理）
     setManual: setManual,             // v0.6.30：整体设置手动名单（弹窗提交）
     resolveConflict: resolveConflict,     // 废弃（空实现兼容）
     isManual: isManual,               // v0.5.6 第五轮：手动名单非空

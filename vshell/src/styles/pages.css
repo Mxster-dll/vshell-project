@@ -1089,3 +1089,9 @@
   padding: 0 10px;
   font-size: 12px;
 }
+
+/* ===== 角色页：从角色排除按钮（v0.6.65，悬停左下角，黑名单钮旁） ===== */
+.vshell .vshell-role-exclude-btn {
+  left: calc(var(--vscode-spacing-size40) + 36px);
+}
+.vshell .vshell-role-exclude-btn:hover { color: var(--vscode-list-warningForeground, #cca700); }

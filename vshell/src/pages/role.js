@@ -877,6 +877,37 @@
       }, V.utils.el('span', { className: 'codicon ' + (on ? 'codicon-star-full' : 'codicon-star-empty') }));
     }
 
+    /** v0.6.65：角色页卡左下角「从角色排除」按钮（悬停显示，黑名单钮旁）：
+     *  点击 → ①从视频角色列表剔除当前角色（videoChars/manuals/charVideos）
+     *  ②写角色级排除表（该角色不再自动赋予此视频、段2 搜索剔除）
+     *  ③卡片立即移除。**不算手动管理**（不进 manManaged 表）。 */
+    function excludeBtn(it) {
+      var b = V.utils.el('button', {
+        className: 'vsc-video-blacklist vshell-role-exclude-btn',
+        type: 'button',
+        title: '从角色「' + role.name + '」排除该视频',
+        'aria-label': '从角色「' + role.name + '」排除',
+        onclick: function (e) {
+          if (e && e.stopPropagation) e.stopPropagation();
+          var srcId = it && it.sourceId && it.sourceId !== 'local' ? it.sourceId : null;
+          if (!srcId) {
+            if (V.toast) V.toast.info('本地视频无法排除角色');
+            return;
+          }
+          // 顺序关键：**先写排除表，再剔除角色**——removeRoleFromVideo 内部
+          // notify → characters.onChange → 页面重建 → charForOn 自动赋予；
+          // 若排除表尚未写入，charForOn 按标题命中会把该角色自动加回
+          // （实测 chars 恢复）。排除表先行 → 重建时 charForOn 过滤掉该角色。
+          try { V.characters.setRoleExcluded(role.name, srcId, it.id, true); } catch (err) { /* noop */ }
+          try { V.characters.removeRoleFromVideo(it.id, srcId, role.name); } catch (err) { /* noop */ }
+          if (V.toast) V.toast.ok('已从「' + role.name + '」排除该视频');
+          var card = b.closest ? b.closest('.vsc-video-card') : null;
+          if (card && card.remove) card.remove();
+        },
+      }, V.utils.el('span', { className: 'codicon codicon-close' }));
+      return b;
+    }
+
     /** 自动无限加载哨兵（v0.5.6 第六轮，用户需求 3）：
      *  - hasMore：挂 IO 哨兵 → 进入视口触发 fetchAgg
      *  - 加载中：spinner 提示
@@ -994,7 +1025,10 @@
         card.style.setProperty('--i', String(added % 12));
         // 第十轮需求 4：增量追加的聚合卡同样挂代表作按钮（actions 内）
         var actionsEl = card.querySelector('.vsc-video-actions');
-        if (actionsEl) actionsEl.appendChild(featureBtn(it));
+        if (actionsEl) {
+          actionsEl.appendChild(featureBtn(it));
+          actionsEl.appendChild(excludeBtn(it));   // v0.6.65：从角色排除
+        }
         wrap.appendChild(card);
         added++;
       });
@@ -1042,7 +1076,10 @@
         // v0.5.6 第十轮需求 4：**所有**卡（手动+聚合）都可设代表作——
         // 按钮挂悬停操作层 actions 内（收藏按钮旁边，需求 3）
         var actionsEl = card.querySelector('.vsc-video-actions');
-        if (actionsEl) actionsEl.appendChild(featureBtn(it));
+        if (actionsEl) {
+          actionsEl.appendChild(featureBtn(it));
+          actionsEl.appendChild(excludeBtn(it));   // v0.6.65：从角色排除
+        }
         wrap.appendChild(card);
       });
       host.appendChild(wrap);
@@ -1138,6 +1175,14 @@
               if (out.length && V.characters && V.characters.isManaged) {
                 out = out.filter(function (it) {
                   try { return !V.characters.isManaged(it.id, id); }
+                  catch (e) { return true; }
+                });
+              }
+              // v0.6.65：**剔除角色级排除的视频**（角色页悬停卡排除——
+              // 不算手动管理，独立排除表；网络+缓存两路都执行）
+              if (out.length && V.characters && V.characters.isRoleExcluded) {
+                out = out.filter(function (it) {
+                  try { return !V.characters.isRoleExcluded(role.name, id, it.id); }
                   catch (e) { return true; }
                 });
               }
