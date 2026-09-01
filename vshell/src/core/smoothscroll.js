@@ -118,6 +118,10 @@
     if (e.deltaMode === 1) dy *= 16;
     else if (e.deltaMode === 2) dy *= el.clientHeight;
     if (Math.abs(dy) < 0.5) return;
+    // v0.6.77：原生 wheel = 用户滚动——必须设置用户滚动标记，否则 app.js
+    // 的 scroll guard（防 Chromium 恢复拉回）会把本通道的滚动误判为恢复、
+    // 每次滚动都拉回顶部（用户反馈"滚一下就有一次回弹"）
+    window.__VS_USER_SCROLLING__ = true;
     e.preventDefault();
     scrollBy(el, dy);
   }, true);
