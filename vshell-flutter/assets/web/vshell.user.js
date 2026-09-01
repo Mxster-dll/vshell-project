@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.57
+// @version      0.6.59
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.57';
+window.VShell.version = '0.6.59';
 
 /* vshell 入口见 src/app.js */
 
@@ -7641,16 +7641,21 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     }
     if (grp) {
       var _gid = grp.id;
+      // v0.6.58：组卡**保留触发成员信息**（标题/封面/源/时长/统计用成员自身，
+      // id 换组 id、href 进组详情、右上角组角标）——否则角色页/主页折叠后
+      // 卡片变成「组主成员」的内容（可能是未启用源/不含关键词标题），
+      // 用户看到「什么视频都有、还有未启用数据源的视频」。
       item = {
         id: _gid,
-        title: grp.title || item.title,
-        pic: grp.cover || item.pic,
-        cover: grp.cover || item.cover,
+        title: item.title || grp.title,
+        pic: item.pic || grp.cover,
+        cover: item.cover || grp.cover,
         duration: item.duration,
         owner: item.owner,
         stat: item.stat,
-        sourceId: grp.coverSrc || item.sourceId,
+        sourceId: item.sourceId || grp.coverSrc,
         _grp: true,
+        _gid: _gid,
       };
     }
     var cover = opts.layout === 'cover';
@@ -18326,17 +18331,17 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
               }).catch(function () { return null; });
             },
             filter: function (items) {
+              var kwsNow = aggKws();
               var out = V.blacklist ? V.blacklist.filter(items) : items;
-              // v0.5.10：排除词过滤放进 opts.filter——source-feed 的 filter
-              // 在网络拉取（pullOne）与缓存加载（loadCache）两路都会执行；
-              // 否则加排除词后已缓存（关键词命中但含排除词）的视频仍会显示。
-              // v0.6.30：全局排除词用**合并条目**（多源同名角色排除词并集）
+              // v0.6.58：缓存加载（loadCache）路径也做**关键词精确过滤**——
+              // 原 fetchFn 只滤网络拉取，旧缓存里含无关标题的视频（历史
+              // 版本未过滤/关键词变更前写入）会直接灌入显示（实测 kkav
+              // 「杨幂/棒棒糖/清纯大学生」等不含关键词的卡）
               var excls = role.globalExclusions;
-              if (excls && excls.length) {
-                out = out.filter(function (it) {
-                  return !exclHit(it.title, excls);
-                });
-              }
+              out = (out || []).filter(function (it) {
+                return it && it.id && kwHit(it.title, kwsNow)
+                  && !(excls && excls.length && exclHit(it.title, excls));
+              });
               // v0.6.30 用户拍板：「搜索完成并筛后，为每个列表中的视频添加
               // 当前的角色」——网络拉取与缓存加载两路都补赋（跨源：a 源
               // 视频 → a 源角色，目标源无同名先建副本复制头像/背景/关键词/
@@ -18452,18 +18457,37 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     /** 从各源 feed 队列取卡到窗口预算（agg.items.length + windowSize），
      *  累积进 agg.items 并返回本轮净新增（fresh）。take 取空时返回 []——
      *  不触发预取（take 内 queue 空短路），需调用方 prefetchAll 补货。 */
+    /** 折叠后去重键：组 → 组 id；普通成员 → 源:id 复合（防跨源同 id 误去重） */
+    function dedupKeyOf(it) {
+      if (!it || !it.id) return '';
+      if (V.aggregations.isGroupId(it.id)) return it.id;
+      if (it.sourceId && it.sourceId !== 'local') {
+        try {
+          var g0 = V.aggregations.groupOf(it.sourceId, it.id);
+          if (g0) return g0.id;
+        } catch (e) { /* noop */ }
+      }
+      return (it.sourceId || '') + ':' + it.id;
+    }
+
     function drain() {
       var fresh = [];
       var seen = {};
-      agg.items.forEach(function (it) { if (it && it.id) seen[it.id] = true; });
+      // v0.6.58：seen 初始化与检查**同规则**（折叠后组 id / 源:id 复合）——
+      // 原初始化记成员裸 id、检查用组 id，首帧后同组成员再次放行 → 组卡重复
+      agg.items.forEach(function (it) {
+        var k = dedupKeyOf(it);
+        if (k) seen[k] = true;
+      });
       var target = agg.items.length + V.multisource.windowSize();
       var guard = 0;
       while (agg.items.length < target && guard < 512) {
         guard++;
         var it = takeOne();
         if (!it) break;
-        if (seen[it.id]) continue;
-        seen[it.id] = true;
+        var dedupId = dedupKeyOf(it);
+        if (!dedupId || seen[dedupId]) continue;
+        seen[dedupId] = true;
         agg.items.push(it);
         fresh.push(it);
       }

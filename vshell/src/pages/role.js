@@ -1112,17 +1112,17 @@
               }).catch(function () { return null; });
             },
             filter: function (items) {
+              var kwsNow = aggKws();
               var out = V.blacklist ? V.blacklist.filter(items) : items;
-              // v0.5.10：排除词过滤放进 opts.filter——source-feed 的 filter
-              // 在网络拉取（pullOne）与缓存加载（loadCache）两路都会执行；
-              // 否则加排除词后已缓存（关键词命中但含排除词）的视频仍会显示。
-              // v0.6.30：全局排除词用**合并条目**（多源同名角色排除词并集）
+              // v0.6.58：缓存加载（loadCache）路径也做**关键词精确过滤**——
+              // 原 fetchFn 只滤网络拉取，旧缓存里含无关标题的视频（历史
+              // 版本未过滤/关键词变更前写入）会直接灌入显示（实测 kkav
+              // 「杨幂/棒棒糖/清纯大学生」等不含关键词的卡）
               var excls = role.globalExclusions;
-              if (excls && excls.length) {
-                out = out.filter(function (it) {
-                  return !exclHit(it.title, excls);
-                });
-              }
+              out = (out || []).filter(function (it) {
+                return it && it.id && kwHit(it.title, kwsNow)
+                  && !(excls && excls.length && exclHit(it.title, excls));
+              });
               // v0.6.30 用户拍板：「搜索完成并筛后，为每个列表中的视频添加
               // 当前的角色」——网络拉取与缓存加载两路都补赋（跨源：a 源
               // 视频 → a 源角色，目标源无同名先建副本复制头像/背景/关键词/
@@ -1238,18 +1238,37 @@
     /** 从各源 feed 队列取卡到窗口预算（agg.items.length + windowSize），
      *  累积进 agg.items 并返回本轮净新增（fresh）。take 取空时返回 []——
      *  不触发预取（take 内 queue 空短路），需调用方 prefetchAll 补货。 */
+    /** 折叠后去重键：组 → 组 id；普通成员 → 源:id 复合（防跨源同 id 误去重） */
+    function dedupKeyOf(it) {
+      if (!it || !it.id) return '';
+      if (V.aggregations.isGroupId(it.id)) return it.id;
+      if (it.sourceId && it.sourceId !== 'local') {
+        try {
+          var g0 = V.aggregations.groupOf(it.sourceId, it.id);
+          if (g0) return g0.id;
+        } catch (e) { /* noop */ }
+      }
+      return (it.sourceId || '') + ':' + it.id;
+    }
+
     function drain() {
       var fresh = [];
       var seen = {};
-      agg.items.forEach(function (it) { if (it && it.id) seen[it.id] = true; });
+      // v0.6.58：seen 初始化与检查**同规则**（折叠后组 id / 源:id 复合）——
+      // 原初始化记成员裸 id、检查用组 id，首帧后同组成员再次放行 → 组卡重复
+      agg.items.forEach(function (it) {
+        var k = dedupKeyOf(it);
+        if (k) seen[k] = true;
+      });
       var target = agg.items.length + V.multisource.windowSize();
       var guard = 0;
       while (agg.items.length < target && guard < 512) {
         guard++;
         var it = takeOne();
         if (!it) break;
-        if (seen[it.id]) continue;
-        seen[it.id] = true;
+        var dedupId = dedupKeyOf(it);
+        if (!dedupId || seen[dedupId]) continue;
+        seen[dedupId] = true;
         agg.items.push(it);
         fresh.push(it);
       }

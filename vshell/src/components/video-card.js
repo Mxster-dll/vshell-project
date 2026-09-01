@@ -59,16 +59,21 @@
     }
     if (grp) {
       var _gid = grp.id;
+      // v0.6.58：组卡**保留触发成员信息**（标题/封面/源/时长/统计用成员自身，
+      // id 换组 id、href 进组详情、右上角组角标）——否则角色页/主页折叠后
+      // 卡片变成「组主成员」的内容（可能是未启用源/不含关键词标题），
+      // 用户看到「什么视频都有、还有未启用数据源的视频」。
       item = {
         id: _gid,
-        title: grp.title || item.title,
-        pic: grp.cover || item.pic,
-        cover: grp.cover || item.cover,
+        title: item.title || grp.title,
+        pic: item.pic || grp.cover,
+        cover: item.cover || grp.cover,
         duration: item.duration,
         owner: item.owner,
         stat: item.stat,
-        sourceId: grp.coverSrc || item.sourceId,
+        sourceId: item.sourceId || grp.coverSrc,
         _grp: true,
+        _gid: _gid,
       };
     }
     var cover = opts.layout === 'cover';
