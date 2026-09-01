@@ -949,13 +949,18 @@
       if (isFinite(d) && d > 0) return d;
       return (playInfo && playInfo.duration) || 0;
     }
-    function tlRow(label, key) {
+    function tlRow(key) {
       var row = V.utils.el('div', { className: 'vshell-tl-row' }, [
-        V.utils.el('span', { className: 'vshell-tl-label' }, label),
         V.utils.el('div', { className: 'vshell-tl-track' }),
       ]);
-      tlRows[key] = { label: label, track: row.querySelector('.vshell-tl-track') };
+      tlRows[key] = { track: row.querySelector('.vshell-tl-track') };
       return row;
+    }
+    function legendItem(label, key) {
+      return V.utils.el('span', { className: 'vshell-tl-legend-item vshell-tl-legend-' + key }, [
+        V.utils.el('span', { className: 'vshell-tl-legend-swatch' }),
+        V.utils.el('span', { className: 'vshell-tl-legend-text' }, label),
+      ]);
     }
     function renderSegs(row, segs, dur) {
       var track = row.track;
@@ -1024,10 +1029,17 @@
     function buildTimeline() {
       tlScanPct = null; tlScanDone = false;
       var tlLastPlayedRender = -1;   // 已播段实时刷新节流（timeupdate 回调闭包）
+      var tlLastCacheRender = -1;    // 缓存段实时刷新节流（同）
+      // v0.6.87：三行纯色条 + 底部图例（色块+名称，常驻）——不再用行内悬停 label
       tlEl = V.utils.el('div', { className: 'vshell-detail-timeline' }, [
-        tlRow('已缓存', 'cache'),
-        tlRow('已分镜识别', 'scan'),
-        tlRow('已播', 'played'),
+        tlRow('cache'),
+        tlRow('scan'),
+        tlRow('played'),
+        V.utils.el('div', { className: 'vshell-tl-legend' }, [
+          legendItem('已缓存', 'cache'),
+          legendItem('已分镜识别', 'scan'),
+          legendItem('已播', 'played'),
+        ]),
       ]);
       tlVideo = player && player.video;
       if (!tlVideo) return;
@@ -1058,6 +1070,12 @@
         if (curSeg && Math.abs(curSeg.e - tlLastPlayedRender) > 0.5) {
           tlLastPlayedRender = curSeg.e;
           renderPlayed();
+        }
+        // v0.6.87 缓存条实时刷新：progress 事件在部分源（HLS/dash）不触发，
+        // 补 timeupdate 通道（节流同已播段）
+        if (Math.abs(t - tlLastCacheRender) > 0.5) {
+          tlLastCacheRender = t;
+          renderCache();
         }
       });
       tlOn('pause', closeSeg);

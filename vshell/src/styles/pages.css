@@ -820,30 +820,7 @@
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
   height: 14px;
-}
-/* v0.6.86 用户需求：行文本默认隐藏，悬停行时浮现（绝对定位不占布局） */
-.vshell .vshell-tl-label {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 2;
-  width: auto;
-  opacity: 0;
-  transition: opacity 0.12s;
-  pointer-events: none;
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground, #9a9a9a);
-  background: var(--vscode-editorWidget-background, #252526);
-  padding: 0 5px;
-  border-radius: 3px;
-  border: 1px solid var(--vscode-panel-border, #3c3c3c);
-  white-space: nowrap;
-}
-.vshell .vshell-tl-row:hover .vshell-tl-label {
-  opacity: 1;
 }
 .vshell .vshell-tl-track {
   position: relative;
@@ -863,6 +840,30 @@
 .vshell .vshell-tl-row:nth-child(1) .vshell-tl-seg { background: var(--vscode-progressBar-background, #0e639c); }
 .vshell .vshell-tl-row:nth-child(2) .vshell-tl-seg { background: var(--vscode-terminal-ansiMagenta, #c586c0); }
 .vshell .vshell-tl-row:nth-child(3) .vshell-tl-seg { background: var(--vscode-charts-green, #89d185); }
+/* v0.6.87 底部图例（常驻：色块+名称） */
+.vshell .vshell-tl-legend {
+  display: flex;
+  gap: 14px;
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid var(--vscode-panel-border, #3c3c3c);
+}
+.vshell .vshell-tl-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #9a9a9a);
+}
+.vshell .vshell-tl-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.vshell .vshell-tl-legend-cache .vshell-tl-legend-swatch { background: var(--vscode-progressBar-background, #0e639c); }
+.vshell .vshell-tl-legend-scan .vshell-tl-legend-swatch { background: var(--vscode-terminal-ansiMagenta, #c586c0); }
+.vshell .vshell-tl-legend-played .vshell-tl-legend-swatch { background: var(--vscode-charts-green, #89d185); }
 .vshell-detail-actions {
   display: flex;
   gap: 10px;

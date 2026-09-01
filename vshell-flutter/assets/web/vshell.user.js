@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.86
+// @version      0.6.87
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.86';
+window.VShell.version = '0.6.87';
 
 /* vshell 入口见 src/app.js */
 
@@ -16426,13 +16426,18 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       if (isFinite(d) && d > 0) return d;
       return (playInfo && playInfo.duration) || 0;
     }
-    function tlRow(label, key) {
+    function tlRow(key) {
       var row = V.utils.el('div', { className: 'vshell-tl-row' }, [
-        V.utils.el('span', { className: 'vshell-tl-label' }, label),
         V.utils.el('div', { className: 'vshell-tl-track' }),
       ]);
-      tlRows[key] = { label: label, track: row.querySelector('.vshell-tl-track') };
+      tlRows[key] = { track: row.querySelector('.vshell-tl-track') };
       return row;
+    }
+    function legendItem(label, key) {
+      return V.utils.el('span', { className: 'vshell-tl-legend-item vshell-tl-legend-' + key }, [
+        V.utils.el('span', { className: 'vshell-tl-legend-swatch' }),
+        V.utils.el('span', { className: 'vshell-tl-legend-text' }, label),
+      ]);
     }
     function renderSegs(row, segs, dur) {
       var track = row.track;
@@ -16501,10 +16506,17 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     function buildTimeline() {
       tlScanPct = null; tlScanDone = false;
       var tlLastPlayedRender = -1;   // 已播段实时刷新节流（timeupdate 回调闭包）
+      var tlLastCacheRender = -1;    // 缓存段实时刷新节流（同）
+      // v0.6.87：三行纯色条 + 底部图例（色块+名称，常驻）——不再用行内悬停 label
       tlEl = V.utils.el('div', { className: 'vshell-detail-timeline' }, [
-        tlRow('已缓存', 'cache'),
-        tlRow('已分镜识别', 'scan'),
-        tlRow('已播', 'played'),
+        tlRow('cache'),
+        tlRow('scan'),
+        tlRow('played'),
+        V.utils.el('div', { className: 'vshell-tl-legend' }, [
+          legendItem('已缓存', 'cache'),
+          legendItem('已分镜识别', 'scan'),
+          legendItem('已播', 'played'),
+        ]),
       ]);
       tlVideo = player && player.video;
       if (!tlVideo) return;
@@ -16535,6 +16547,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         if (curSeg && Math.abs(curSeg.e - tlLastPlayedRender) > 0.5) {
           tlLastPlayedRender = curSeg.e;
           renderPlayed();
+        }
+        // v0.6.87 缓存条实时刷新：progress 事件在部分源（HLS/dash）不触发，
+        // 补 timeupdate 通道（节流同已播段）
+        if (Math.abs(t - tlLastCacheRender) > 0.5) {
+          tlLastCacheRender = t;
+          renderCache();
         }
       });
       tlOn('pause', closeSeg);
@@ -27056,30 +27074,7 @@ body.vshell-dragging a { pointer-events: none; }
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
   height: 14px;
-}
-/* v0.6.86 用户需求：行文本默认隐藏，悬停行时浮现（绝对定位不占布局） */
-.vshell .vshell-tl-label {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 2;
-  width: auto;
-  opacity: 0;
-  transition: opacity 0.12s;
-  pointer-events: none;
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground, #9a9a9a);
-  background: var(--vscode-editorWidget-background, #252526);
-  padding: 0 5px;
-  border-radius: 3px;
-  border: 1px solid var(--vscode-panel-border, #3c3c3c);
-  white-space: nowrap;
-}
-.vshell .vshell-tl-row:hover .vshell-tl-label {
-  opacity: 1;
 }
 .vshell .vshell-tl-track {
   position: relative;
@@ -27099,6 +27094,30 @@ body.vshell-dragging a { pointer-events: none; }
 .vshell .vshell-tl-row:nth-child(1) .vshell-tl-seg { background: var(--vscode-progressBar-background, #0e639c); }
 .vshell .vshell-tl-row:nth-child(2) .vshell-tl-seg { background: var(--vscode-terminal-ansiMagenta, #c586c0); }
 .vshell .vshell-tl-row:nth-child(3) .vshell-tl-seg { background: var(--vscode-charts-green, #89d185); }
+/* v0.6.87 底部图例（常驻：色块+名称） */
+.vshell .vshell-tl-legend {
+  display: flex;
+  gap: 14px;
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid var(--vscode-panel-border, #3c3c3c);
+}
+.vshell .vshell-tl-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #9a9a9a);
+}
+.vshell .vshell-tl-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.vshell .vshell-tl-legend-cache .vshell-tl-legend-swatch { background: var(--vscode-progressBar-background, #0e639c); }
+.vshell .vshell-tl-legend-scan .vshell-tl-legend-swatch { background: var(--vscode-terminal-ansiMagenta, #c586c0); }
+.vshell .vshell-tl-legend-played .vshell-tl-legend-swatch { background: var(--vscode-charts-green, #89d185); }
 .vshell-detail-actions {
   display: flex;
   gap: 10px;
