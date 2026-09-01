@@ -26,14 +26,17 @@
     return null;
   }
 
-  /** dy>0 向下滚（内容上移）；x,y = CSS 像素（相对视口） */
+  /** dy>0 向下滚（内容上移）；x,y = CSS 像素（相对视口）。
+   *  v0.6.73：平滑滚动（rAF 插值）——滚轮不再硬跳。 */
   window.__VS_SCROLL__ = function (dy, x, y) {
     var target = findScrollable(x, y);
     if (target) {
+      if (V.smoothScroll && V.smoothScroll.scrollBy && V.smoothScroll.scrollBy(target, dy)) return;
       target.scrollTop += dy;
       return;
     }
     var sc = document.scrollingElement || document.documentElement;
+    if (V.smoothScroll && V.smoothScroll.scrollBy && V.smoothScroll.scrollBy(sc, dy)) return;
     sc.scrollTop += dy;
   };
 
