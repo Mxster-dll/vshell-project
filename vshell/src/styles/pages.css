@@ -836,21 +836,9 @@
   bottom: 0;
   border-radius: 3px;
 }
-/* v0.6.88 播放位置指示线（跟随 currentTime，三行对齐） */
-.vshell .vshell-tl-now {
-  position: absolute;
-  top: -1px;
-  bottom: -1px;
-  width: 2px;
-  margin-left: -1px;
-  background: var(--vscode-foreground, #cccccc);
-  opacity: 0.75;
-  border-radius: 1px;
-  pointer-events: none;
-  z-index: 1;
-}
-/* 行配色：已缓存=蓝 / 已分镜识别=紫 / 已播=绿 */
-.vshell .vshell-tl-row:nth-child(1) .vshell-tl-seg { background: var(--vscode-progressBar-background, #0e639c); }
+/* 行配色：已缓存=亮蓝 / 已分镜识别=紫 / 已播=绿
+   v0.6.92 缓存色加亮（原深蓝 0e639c 在暗轨上接近灰色，用户误认） */
+.vshell .vshell-tl-row:nth-child(1) .vshell-tl-seg { background: var(--vscode-textLink-foreground, #4fc1ff); }
 .vshell .vshell-tl-row:nth-child(2) .vshell-tl-seg { background: var(--vscode-terminal-ansiMagenta, #c586c0); }
 .vshell .vshell-tl-row:nth-child(3) .vshell-tl-seg { background: var(--vscode-charts-green, #89d185); }
 /* v0.6.87 底部图例（常驻：色块+名称） */
@@ -874,7 +862,7 @@
   border-radius: 3px;
   flex-shrink: 0;
 }
-.vshell .vshell-tl-legend-cache .vshell-tl-legend-swatch { background: var(--vscode-progressBar-background, #0e639c); }
+.vshell .vshell-tl-legend-cache .vshell-tl-legend-swatch { background: var(--vscode-textLink-foreground, #4fc1ff); }
 .vshell .vshell-tl-legend-scan .vshell-tl-legend-swatch { background: var(--vscode-terminal-ansiMagenta, #c586c0); }
 .vshell .vshell-tl-legend-played .vshell-tl-legend-swatch { background: var(--vscode-charts-green, #89d185); }
 .vshell-detail-actions {

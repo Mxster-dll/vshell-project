@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.91
+// @version      0.6.92
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.91';
+window.VShell.version = '0.6.92';
 
 /* vshell 入口见 src/app.js */
 
@@ -16444,16 +16444,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     function renderSegs(row, segs, dur) {
       var track = row.track;
       track.innerHTML = '';
-      // v0.6.88 播放位置指示线（无条件绘制——空行也画，时间轴有动态感）
-      if (dur && tlVideo) {
-        var t = tlVideo.currentTime;
-        if (isFinite(t) && t >= 0 && t <= dur) {
-          var n = document.createElement('div');
-          n.className = 'vshell-tl-now';
-          n.style.left = ((t / dur) * 100).toFixed(2) + '%';
-          track.appendChild(n);
-        }
-      }
+      // v0.6.92：移除播放位置指示线（用户反馈：三行灰色短条混淆——
+      // 时间轴只显示区间，不显示同步位置）
       if (!segs || !segs.length) return;
       segs.forEach(function (r) {
         var el = document.createElement('div');
@@ -27107,21 +27099,9 @@ body.vshell-dragging a { pointer-events: none; }
   bottom: 0;
   border-radius: 3px;
 }
-/* v0.6.88 播放位置指示线（跟随 currentTime，三行对齐） */
-.vshell .vshell-tl-now {
-  position: absolute;
-  top: -1px;
-  bottom: -1px;
-  width: 2px;
-  margin-left: -1px;
-  background: var(--vscode-foreground, #cccccc);
-  opacity: 0.75;
-  border-radius: 1px;
-  pointer-events: none;
-  z-index: 1;
-}
-/* 行配色：已缓存=蓝 / 已分镜识别=紫 / 已播=绿 */
-.vshell .vshell-tl-row:nth-child(1) .vshell-tl-seg { background: var(--vscode-progressBar-background, #0e639c); }
+/* 行配色：已缓存=亮蓝 / 已分镜识别=紫 / 已播=绿
+   v0.6.92 缓存色加亮（原深蓝 0e639c 在暗轨上接近灰色，用户误认） */
+.vshell .vshell-tl-row:nth-child(1) .vshell-tl-seg { background: var(--vscode-textLink-foreground, #4fc1ff); }
 .vshell .vshell-tl-row:nth-child(2) .vshell-tl-seg { background: var(--vscode-terminal-ansiMagenta, #c586c0); }
 .vshell .vshell-tl-row:nth-child(3) .vshell-tl-seg { background: var(--vscode-charts-green, #89d185); }
 /* v0.6.87 底部图例（常驻：色块+名称） */
@@ -27145,7 +27125,7 @@ body.vshell-dragging a { pointer-events: none; }
   border-radius: 3px;
   flex-shrink: 0;
 }
-.vshell .vshell-tl-legend-cache .vshell-tl-legend-swatch { background: var(--vscode-progressBar-background, #0e639c); }
+.vshell .vshell-tl-legend-cache .vshell-tl-legend-swatch { background: var(--vscode-textLink-foreground, #4fc1ff); }
 .vshell .vshell-tl-legend-scan .vshell-tl-legend-swatch { background: var(--vscode-terminal-ansiMagenta, #c586c0); }
 .vshell .vshell-tl-legend-played .vshell-tl-legend-swatch { background: var(--vscode-charts-green, #89d185); }
 .vshell-detail-actions {
