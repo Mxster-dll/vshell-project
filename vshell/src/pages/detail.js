@@ -1023,6 +1023,13 @@
           } catch (e) { /* noop */ }
         }
       }
+      // v0.6.97 悬停预览（独立隐藏 video）实际加载的数据也计入缓存条
+      if (player && player.getPrevBuffered) {
+        var pb = player.getPrevBuffered();
+        for (var j = 0; j < pb.length; j++) {
+          try { tlCacheHist = V.playHistory._merge(tlCacheHist, pb[j].s, pb[j].e); } catch (e) { /* noop */ }
+        }
+      }
       var track = tlRows && tlRows.cache && tlRows.cache.track;
       if (!track) return;
       track.innerHTML = '';
@@ -1085,8 +1092,11 @@
       // v0.6.96 悬停进度条 → 三条时间轴对应位置竖线（不需要 video 就绪）
       if (player && player.onBarHover) {
         player.onBarHover(function (pct) {
-          if (pct === null) hideTimelineHover();
-          else showTimelineHover(pct);
+          if (pct === null) { hideTimelineHover(); }
+          else {
+            showTimelineHover(pct);
+            renderCache();   // v0.6.97 悬停加载的预览数据尽快计入缓存条（有节流）
+          }
         });
       }
       if (!tlVideo) return;

@@ -738,6 +738,15 @@
       pause: function () { video.pause(); },
       stop: function () { video.pause(); video.removeAttribute('src'); video.load(); destroyDash(); destroyHls(); },
       get playing() { return state.playing; },
+      // v0.6.97 悬停预览（独立隐藏 video）实际加载的缓冲区间——供时间轴缓存条合并
+      getPrevBuffered: function () {
+        if (!prevVideo || !prevVideo.buffered || !prevVideo.buffered.length) return [];
+        var out = [];
+        for (var i = 0; i < prevVideo.buffered.length; i++) {
+          try { out.push({ s: prevVideo.buffered.start(i), e: prevVideo.buffered.end(i) }); } catch (e) { /* noop */ }
+        }
+        return out;
+      },
       // v0.6.96 进度条悬停通知（非拖动）：cb(pct) 0-100 / 移出 cb(null)
       onBarHover: function (cb) {
         var cur = null;
