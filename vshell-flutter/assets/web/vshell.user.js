@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.84
+// @version      0.6.85
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.84';
+window.VShell.version = '0.6.85';
 
 /* vshell 入口见 src/app.js */
 
@@ -16469,7 +16469,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       track.innerHTML = '';
       var dur = tlDur();
       if (!dur) return;
-      renderSegs(tlRows.played, V.playHistory.get(id), dur);
+      // 闭合段（store）+ 当前播放段（curSeg，实时延伸）
+      var segs = V.playHistory.get(id).slice();
+      if (curSeg) segs.push({ s: curSeg.s, e: curSeg.e });
+      renderSegs(tlRows.played, segs, dur);
     }
     function renderIdentified() {
       var track = tlRows && tlRows.scan && tlRows.scan.track;
@@ -16497,6 +16500,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     }
     function buildTimeline() {
       tlScanPct = null; tlScanDone = false;
+      var tlLastPlayedRender = -1;   // 已播段实时刷新节流（timeupdate 回调闭包）
       tlEl = V.utils.el('div', { className: 'vshell-detail-timeline' }, [
         tlRow('已缓存', 'cache'),
         tlRow('已分镜识别', 'scan'),
@@ -16504,15 +16508,34 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       ]);
       tlVideo = player && player.video;
       if (!tlVideo) return;
-      // 播放历史会话段：play/timeupdate 延伸，pause/seeked/ended 闭合落盘
+      // 播放历史会话段：play/timeupdate 延伸，pause/seeked/ended 闭合落盘。
+      // seek 跳转：timeupdate 会在 seeked 前用新 currentTime 触发——若直接
+      // curSeg.e = t 会把旧段错误延伸到跳转目标（用户实测「已播显示成从头
+      // 开始的条」）。修复：timeupdate 检测大跳跃（>2s）→ 先闭合旧段再开新段。
       tlOn('play', function () {
         if (!curSeg) curSeg = { s: tlVideo.currentTime, e: tlVideo.currentTime };
+        renderPlayed();
       });
       tlOn('timeupdate', function () {
         var t = tlVideo.currentTime;
-        if (curSeg) curSeg.e = t;
-        else if (!tlVideo.paused) curSeg = { s: t, e: t };
+        if (curSeg) {
+          if (Math.abs(t - curSeg.e) > 2) {
+            // 大跳跃（seek/跳转）：闭合旧段（用跳转前的 e），开新段
+            V.playHistory.addSegment(id, curSeg.s, curSeg.e);
+            curSeg = { s: t, e: t };
+            renderPlayed();
+          } else {
+            curSeg.e = t;
+          }
+        } else if (!tlVideo.paused) {
+          curSeg = { s: t, e: t };
+        }
         renderIdentified();                       // attach 覆盖跟随播放位置
+        // 实时刷新「已播」段（节流：段长增长 >0.5s 才重建，避免 4 次/s 重建）
+        if (curSeg && Math.abs(curSeg.e - tlLastPlayedRender) > 0.5) {
+          tlLastPlayedRender = curSeg.e;
+          renderPlayed();
+        }
       });
       tlOn('pause', closeSeg);
       tlOn('seeked', closeSeg);

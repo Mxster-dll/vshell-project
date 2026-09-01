@@ -992,7 +992,10 @@
       track.innerHTML = '';
       var dur = tlDur();
       if (!dur) return;
-      renderSegs(tlRows.played, V.playHistory.get(id), dur);
+      // 闭合段（store）+ 当前播放段（curSeg，实时延伸）
+      var segs = V.playHistory.get(id).slice();
+      if (curSeg) segs.push({ s: curSeg.s, e: curSeg.e });
+      renderSegs(tlRows.played, segs, dur);
     }
     function renderIdentified() {
       var track = tlRows && tlRows.scan && tlRows.scan.track;
@@ -1020,6 +1023,7 @@
     }
     function buildTimeline() {
       tlScanPct = null; tlScanDone = false;
+      var tlLastPlayedRender = -1;   // 已播段实时刷新节流（timeupdate 回调闭包）
       tlEl = V.utils.el('div', { className: 'vshell-detail-timeline' }, [
         tlRow('已缓存', 'cache'),
         tlRow('已分镜识别', 'scan'),
@@ -1027,15 +1031,34 @@
       ]);
       tlVideo = player && player.video;
       if (!tlVideo) return;
-      // 播放历史会话段：play/timeupdate 延伸，pause/seeked/ended 闭合落盘
+      // 播放历史会话段：play/timeupdate 延伸，pause/seeked/ended 闭合落盘。
+      // seek 跳转：timeupdate 会在 seeked 前用新 currentTime 触发——若直接
+      // curSeg.e = t 会把旧段错误延伸到跳转目标（用户实测「已播显示成从头
+      // 开始的条」）。修复：timeupdate 检测大跳跃（>2s）→ 先闭合旧段再开新段。
       tlOn('play', function () {
         if (!curSeg) curSeg = { s: tlVideo.currentTime, e: tlVideo.currentTime };
+        renderPlayed();
       });
       tlOn('timeupdate', function () {
         var t = tlVideo.currentTime;
-        if (curSeg) curSeg.e = t;
-        else if (!tlVideo.paused) curSeg = { s: t, e: t };
+        if (curSeg) {
+          if (Math.abs(t - curSeg.e) > 2) {
+            // 大跳跃（seek/跳转）：闭合旧段（用跳转前的 e），开新段
+            V.playHistory.addSegment(id, curSeg.s, curSeg.e);
+            curSeg = { s: t, e: t };
+            renderPlayed();
+          } else {
+            curSeg.e = t;
+          }
+        } else if (!tlVideo.paused) {
+          curSeg = { s: t, e: t };
+        }
         renderIdentified();                       // attach 覆盖跟随播放位置
+        // 实时刷新「已播」段（节流：段长增长 >0.5s 才重建，避免 4 次/s 重建）
+        if (curSeg && Math.abs(curSeg.e - tlLastPlayedRender) > 0.5) {
+          tlLastPlayedRender = curSeg.e;
+          renderPlayed();
+        }
       });
       tlOn('pause', closeSeg);
       tlOn('seeked', closeSeg);
