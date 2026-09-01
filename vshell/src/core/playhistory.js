@@ -17,7 +17,7 @@
   var V = window.VShell = window.VShell || {};
 
   var KEY = 'played.';       // store 键前缀
-  var MIN_SEG = 0.5;         // 最小段长（秒）：不足忽略（闪点/误触不算已播）
+  var MIN_SEG = 2;           // 最小段长（秒）：不足忽略（seek 抖动/误触不算已播，v0.6.93 0.5→2）
   var MERGE_GAP = 0.5;       // 邻接合并容差（秒）：两段间隔 <= 0.5s 视为连续
 
   function norm(x) {

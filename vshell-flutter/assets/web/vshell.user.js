@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.92
+// @version      0.6.93
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.92';
+window.VShell.version = '0.6.93';
 
 /* vshell 入口见 src/app.js */
 
@@ -3926,7 +3926,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   var V = window.VShell = window.VShell || {};
 
   var KEY = 'played.';       // store 键前缀
-  var MIN_SEG = 0.5;         // 最小段长（秒）：不足忽略（闪点/误触不算已播）
+  var MIN_SEG = 2;           // 最小段长（秒）：不足忽略（seek 抖动/误触不算已播，v0.6.93 0.5→2）
   var MERGE_GAP = 0.5;       // 邻接合并容差（秒）：两段间隔 <= 0.5s 视为连续
 
   function norm(x) {
