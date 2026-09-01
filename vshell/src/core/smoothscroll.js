@@ -58,6 +58,7 @@
       return;
     }
     var dt = Math.min(64, Math.max(1, now - (s.last || now)));
+    if (!(dt > 0)) dt = 16;   // 防御：now 缺失/NaN 时按一帧计（首帧触顶 bug 兜底）
     s.last = now;
     var f = 1 - Math.exp(-dt / TAU);
     el.scrollTop = cur + diff * f;
@@ -72,7 +73,7 @@
     s.target = clampNum(s.target + dy, 0, maxTop(el));
     if (!s.raf) {
       var elRef = el, sRef = s;
-      s.raf = requestAnimationFrame(function () { tick(elRef, sRef); });
+      s.raf = requestAnimationFrame(function (n) { tick(elRef, sRef, n); });
     }
     return true;
   }
