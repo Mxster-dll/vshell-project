@@ -31,6 +31,9 @@
     return feed ? feed.scrollTop : sc.scrollTop;
   }
   function restoreScroll(y) {
+    // v0.6.76：标记程序滚动（scroll guard 豁免窗口用）——返回页恢复是
+    // 程序写入，不能被加载早期防 Chromium 恢复的 guard 误拉回 0
+    window.__VS_PROG_SCROLL_AT__ = Date.now();
     var sc = document.querySelector('.vshell-page');
     if (!sc) return;
     var feed = sc.querySelector('.vshell-feed');
@@ -505,10 +508,10 @@
     try { if (V.cardSize && V.cardSize.apply) V.cardSize.apply(); } catch (e) { /* noop */ }
     // v0.6.75：Chromium 可能在 scrollRestoration='manual' 生效前（加载早期）
     // 恢复过滚动位置（实测新实例加载后 scrollTop=上次会话值 676，恢复窗口
-    // 在加载后 ~1s 内，JS 层面无写入者，patch scrollTop 只抓到自身赋值）——
-    // 延迟到恢复窗口之后（1.5s）再检查重置；scrollState 是内存态，新会话
-    // 无恢复记录 → 重置顶部；同会话返回（有记录）保留。窗口内用户已滚动
-    // （__VS_USER_SCROLLING__，滚轮桥标记）→ 不重置，尊重用户位置。
+    // 最长 ~10s+、时机不定，JS 层面无写入者）——延迟 12s（越过恢复窗口）再
+    // 检查重置；scrollState 是内存态，新会话无恢复记录 → 重置顶部；同会话
+    // 返回（有记录）保留。窗口内用户已滚动（__VS_USER_SCROLLING__，滚轮桥
+    // 标记）→ 不重置，尊重用户位置。
     setTimeout(function () {
       try {
         if (window.__VS_USER_SCROLLING__) return;
@@ -519,7 +522,23 @@
           if (_sc && _sc.scrollTop !== 0) _sc.scrollTop = 0;
         }
       } catch (e) { /* noop */ }
-    }, 1500);
+    }, 12000);
+
+    // v0.6.76 scroll guard：加载后 15s 内，用户从未滚动、也非程序恢复时，
+    // 任何 scrollTop 变化（= Chromium 恢复把页面拉到上次会话位置）立即拉回
+    // 顶部——彻底防"加载后滚动被拽回旧位置"。用户滚动后（__VS_USER_SCROLLING__
+    // 永久标记）guard 不再干预；恢复窗口结束（15s）自动摘除。
+    var _progAt = function () { return window.__VS_PROG_SCROLL_AT__ || 0; };
+    var _scGuard = function () {
+      try {
+        if (window.__VS_USER_SCROLLING__) return;              // 用户已滚动 → 尊重
+        if (Date.now() - _progAt() < 200) return;              // 程序恢复（返回页）豁免
+        var _sc2 = document.querySelector('.vshell-page');
+        if (_sc2 && _sc2.scrollTop !== 0) _sc2.scrollTop = 0;  // 无主写入（恢复）→ 拉回顶部
+      } catch (e) { /* noop */ }
+    };
+    document.addEventListener('scroll', _scGuard, true);
+    setTimeout(function () { document.removeEventListener('scroll', _scGuard, true); }, 15000);
   }
 
   /** 启动：插件数据源时先 ensureLoaded（读文件注入适配器）再 boot——

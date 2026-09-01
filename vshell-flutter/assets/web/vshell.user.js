@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.75
+// @version      0.6.76
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.75';
+window.VShell.version = '0.6.76';
 
 /* vshell 入口见 src/app.js */
 
@@ -3838,23 +3838,21 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
 /* ===== src/core/smoothscroll.js ===== */
 
 /* ============================================================
- * smoothscroll — 视频墙平滑滚动（v0.6.74→v0.6.75 用户需求：任何
- * 视频墙都添加平滑滚动效果；经用户建议参考成熟实现，照抄 Lenis
- * （github.com/darkroomengineering/lenis）核心算法重写）
+ * smoothscroll — 视频墙平滑滚动（v0.6.76 用户明确算法：
+ *  「有一个目标位置，鼠标滚轮每次滚动只会影响这个目标位置，
+ *  当目标位置变化时相应调整速度，速度也是平滑变化的」）
  *
- * Lenis LERP 模式（DeepWiki 确认）：
- *   value = value + (target - value) * lerp
- *   lerpFactor = 1 - (1 - lerp)^(dt / 16.6667)   // 帧率补偿
- *   velocity = delta / dt                         // 速度跟踪
- *   停止：|target - value| <= 0.5 或 velocity <= 0.001
+ * 弹簧-阻尼速度模型（smooth-scrollbar 物理算法）：
+ *   vel += (target - pos) * STIFF * dt    弹簧力：位置差 → 加速度
+ *   vel *= exp(-DAMP * dt)                阻尼：速度指数衰减（平滑）
+ *   pos += vel * dt                       积分：位置按速度移动
+ * 临界阻尼 DAMP = 2√STIFF → 无过冲、无振荡、快速到位。
  *
- * 特性（与 Lenis 一致的"丝滑"体验）：
- *  - 虚拟位置 s.pos：动画独立于真实 scrollTop（不受外部改动干扰），
- *    动画未跑时校准到真实位置；
- *  - 纯指数趋近、无即时跳变：快速滚动时 diff 累积大 → 每帧位移大 →
- *    视觉为连续加速的惯性滚动（无逐格跳感——v0.6.74 等效 lerp 0.34
- *    每格动画独立+50% 即时跳是"不顺滑"的根源）；
- *  - 默认 lerp = 0.1（Lenis 默认值）：停止后快速收敛，无长尾随。
+ * 特性：
+ *  - 滚轮（scrollBy）**只改 target**，不直接动 pos/scrollTop；
+ *  - target 变化 → 弹簧力产生加速度 → 速度平滑调整（不突变）；
+ *  - 虚拟位置 s.pos：动画独立于真实 scrollTop，未跑时校准真实位置；
+ *  - 停止：接近目标且速度几乎为零（无长尾随、无逐格跳感）。
  *
  * 两个入口统一走 V.smoothScroll.scrollBy：
  *  - Flutter 壳滚轮桥（scrollbridge.js 的 __VS_SCROLL__）——
@@ -3868,11 +3866,6 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
 (function () {
   'use strict';
   var V = window.VShell = window.VShell || {};
-
-  // Lenis 默认 0.1 对我们场景（滚轮每格 ~60px 小步）太慢（700ms/格）。
-  // 0.25：单格 ~240ms 到位、前 100ms 移动 75%——跟手且连续惯性
-  //（滚快时 diff 大 → 每帧位移大 → 连续加速无逐格感）
-  var LERP = 0.25;
 
   var states = (typeof WeakMap === 'function') ? new WeakMap() : null;
   function getState(el) {
@@ -3890,21 +3883,32 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   function maxTop(el) { return Math.max(0, el.scrollHeight - el.clientHeight); }
   function clampNum(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-  /** Lenis damp：帧率补偿的指数趋近 */
-  function damp(current, target, dt) {
-    var f = 1 - Math.pow(1 - LERP, dt / 16.6667);
-    return current + (target - current) * f;
-  }
+  /** 弹簧-阻尼速度模型（smooth-scrollbar 物理算法；v0.6.76 用户明确：
+   *  滚轮只影响目标位置；目标变化时通过弹簧力平滑调整速度，速度本身
+   *  连续平滑变化）：
+   *    vel += (target - pos) * STIFF * dt    弹簧力（位置差 → 加速度）
+   *    vel *= exp(-DAMP * dt)                阻尼（速度指数衰减，平滑）
+   *    pos += vel * dt                       积分（位置按速度移动）
+   *  临界阻尼 DAMP = 2√STIFF → 无过冲、无振荡、快速到位。 */
+  var STIFF = 250;    // 弹簧刚度 1/s²（越大响应越快；ω=√STIFF≈15.8 → 95% 到位 ~190ms）
+  var DAMP = 2 * Math.sqrt(STIFF);   // 临界阻尼 ≈31.6（速度平滑、无回弹）
 
   function tick(el, s, now) {
-    var dt = Math.min(64, Math.max(1, now - (s.last || now)));   // ms
+    var dt;
+    if (!s.last) { s.last = now; dt = 16; }   // 首帧：按一帧计（s.last=0 时 dt 会变 1ms 起步慢）
+    else { dt = Math.min(64, Math.max(1, now - s.last)); }
     if (!(dt > 0)) dt = 16;   // 防御：now 缺失/NaN 时按一帧计
     s.last = now;
-    var prev = s.pos;
-    s.pos = damp(s.pos, s.target, dt);
-    s.vel = (s.pos - prev) / dt;     // px/ms
+    var dtS = dt / 1000;
+    // 1) 目标与位置之差 → 加速度（滚轮改 target 后速度随之平滑调整）
+    s.vel += (s.target - s.pos) * STIFF * dtS;
+    // 2) 阻尼：速度指数衰减（防振荡、停得干净）
+    s.vel *= Math.exp(-DAMP * dtS);
+    // 3) 积分：位置按速度移动
+    s.pos += s.vel * dtS;
     el.scrollTop = s.pos;
-    if (Math.abs(s.target - s.pos) <= 0.5 || s.vel <= 0.001) {
+    // 停止：接近目标即落位（消除最后几像素磨蹭）+ 速度几乎为零防振荡
+    if (Math.abs(s.target - s.pos) <= 1.5 || (Math.abs(s.target - s.pos) <= 8 && Math.abs(s.vel) <= 0.15)) {
       el.scrollTop = s.target;
       s.raf = 0;
       return;
@@ -19893,6 +19897,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     return feed ? feed.scrollTop : sc.scrollTop;
   }
   function restoreScroll(y) {
+    // v0.6.76：标记程序滚动（scroll guard 豁免窗口用）——返回页恢复是
+    // 程序写入，不能被加载早期防 Chromium 恢复的 guard 误拉回 0
+    window.__VS_PROG_SCROLL_AT__ = Date.now();
     var sc = document.querySelector('.vshell-page');
     if (!sc) return;
     var feed = sc.querySelector('.vshell-feed');
@@ -20367,10 +20374,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     try { if (V.cardSize && V.cardSize.apply) V.cardSize.apply(); } catch (e) { /* noop */ }
     // v0.6.75：Chromium 可能在 scrollRestoration='manual' 生效前（加载早期）
     // 恢复过滚动位置（实测新实例加载后 scrollTop=上次会话值 676，恢复窗口
-    // 在加载后 ~1s 内，JS 层面无写入者，patch scrollTop 只抓到自身赋值）——
-    // 延迟到恢复窗口之后（1.5s）再检查重置；scrollState 是内存态，新会话
-    // 无恢复记录 → 重置顶部；同会话返回（有记录）保留。窗口内用户已滚动
-    // （__VS_USER_SCROLLING__，滚轮桥标记）→ 不重置，尊重用户位置。
+    // 最长 ~10s+、时机不定，JS 层面无写入者）——延迟 12s（越过恢复窗口）再
+    // 检查重置；scrollState 是内存态，新会话无恢复记录 → 重置顶部；同会话
+    // 返回（有记录）保留。窗口内用户已滚动（__VS_USER_SCROLLING__，滚轮桥
+    // 标记）→ 不重置，尊重用户位置。
     setTimeout(function () {
       try {
         if (window.__VS_USER_SCROLLING__) return;
@@ -20381,7 +20388,23 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           if (_sc && _sc.scrollTop !== 0) _sc.scrollTop = 0;
         }
       } catch (e) { /* noop */ }
-    }, 1500);
+    }, 12000);
+
+    // v0.6.76 scroll guard：加载后 15s 内，用户从未滚动、也非程序恢复时，
+    // 任何 scrollTop 变化（= Chromium 恢复把页面拉到上次会话位置）立即拉回
+    // 顶部——彻底防"加载后滚动被拽回旧位置"。用户滚动后（__VS_USER_SCROLLING__
+    // 永久标记）guard 不再干预；恢复窗口结束（15s）自动摘除。
+    var _progAt = function () { return window.__VS_PROG_SCROLL_AT__ || 0; };
+    var _scGuard = function () {
+      try {
+        if (window.__VS_USER_SCROLLING__) return;              // 用户已滚动 → 尊重
+        if (Date.now() - _progAt() < 200) return;              // 程序恢复（返回页）豁免
+        var _sc2 = document.querySelector('.vshell-page');
+        if (_sc2 && _sc2.scrollTop !== 0) _sc2.scrollTop = 0;  // 无主写入（恢复）→ 拉回顶部
+      } catch (e) { /* noop */ }
+    };
+    document.addEventListener('scroll', _scGuard, true);
+    setTimeout(function () { document.removeEventListener('scroll', _scGuard, true); }, 15000);
   }
 
   /** 启动：插件数据源时先 ensureLoaded（读文件注入适配器）再 boot——
