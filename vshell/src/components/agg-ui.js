@@ -1,7 +1,7 @@
 /* ============================================================
  * agg-ui — 视频聚合二期交互（v0.6.2）
  *   右键菜单：单卡「新增为组 / 添加到组 / 多选」；组卡「添加到组」
- *   多选模式：「新增为一组 / 新增为多组 / 添加到组 / 取消」
+ *   多选模式：「合并为一组 / 新增为多组 / 添加到组 / 取消」
  *   拖拽合并（长按 400ms）：单+单→建组弹窗选标题封面、视频↔组→直接并入、
  *     组+组→合并弹窗选标题封面
  *   组选择弹窗（搜索 + 新建组）
@@ -521,7 +521,7 @@
       multi.btns.push(b);
       bar.appendChild(b);
     }
-    mk('新增为一组', 'vshell-btn-primary', true, function (ms) { createGroupDlg(ms); });
+    mk('合并为一组', 'vshell-btn-primary', true, function (ms) { createGroupDlg(ms); });
     mk('新增为多组', 'vshell-btn', true, function (ms) {
       var n = 0;
       ms.forEach(function (m) {

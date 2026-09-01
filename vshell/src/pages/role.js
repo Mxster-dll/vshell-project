@@ -660,6 +660,9 @@
     // 删除关键词/排除词等**无关变更**也会整排重建（innerHTML='' + 重建 mq →
     // 滚动动画重置闪动）。指纹不变时跳过重建。
     var mqFpLast = '';
+    // v0.6.72：当前墙的聚合组去重 seen（renderMerged 重建时重置，
+    // appendAggItems 增量沿用——同组只显示一张组卡，成员不再独立显示）
+    var grpSeen = {};
     var manualCount = V.characters.videosOf(role.name).length;
     // v0.5.6 第五轮：聚合按角色的**所有关键词**搜索；关键词被删光时兜底角色名
     function aggKws() {
@@ -1027,7 +1030,11 @@
       }
       // v0.6.0：聚合卡按 source-feed 取卡顺序（数据源返回顺序 + abcabc 轮转）
       // 追加，不再做播放量降序/本地置顶排序（本地视频已在 collectLocal 置顶）
+      // v0.6.72：增量追加同样折叠组内成员（沿用当前墙 grpSeen，同组只显示一张组卡）
       var fresh = items.slice();
+      if (V.aggregations && V.aggregations.dedupWallItems) {
+        fresh = V.aggregations.dedupWallItems(fresh, grpSeen);
+      }
       var added = 0;
       fresh.forEach(function (it) {
         if (!it || !it.id || renderedIds[it.id]) return;
@@ -1059,7 +1066,12 @@
     var renderedIds = {};
     function renderMerged() {
       body.innerHTML = '';
+      // v0.6.72：组内成员只显示组（同组第一张折叠成组卡，其余跳过）
+      grpSeen = {};
       var merged = mergedItems();
+      if (V.aggregations && V.aggregations.dedupWallItems) {
+        merged = V.aggregations.dedupWallItems(merged, grpSeen);
+      }
       var host = V.utils.el('div', { className: 'vshell-role-gridhost' });
       body.appendChild(host);
       if (!merged.length) {

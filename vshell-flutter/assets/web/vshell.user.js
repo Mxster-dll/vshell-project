@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.71
+// @version      0.6.72
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.71';
+window.VShell.version = '0.6.72';
 
 /* vshell 入口见 src/app.js */
 
@@ -5284,6 +5284,31 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   }
   function getGroup(gid) { load(); return map.groups[gid] || null; }
 
+  /** v0.6.72 用户需求：组内任何视频都不能再独立显示，只能显示组——
+   *  视频墙渲染前过滤：组成员（或已折叠的组卡）同组只保留第一张
+   *  （组卡 id 或成员折叠得到的组 id），其余跳过。
+   *  seen 由调用方管理生命周期：墙全量重建时传新对象，增量追加沿用
+   *  同一对象（否则已显示的组卡会被再次折叠重复）。 */
+  function dedupWallItems(items, seen) {
+    if (!items || !items.length) return items;
+    seen = seen || {};
+    return items.filter(function (it) {
+      if (!it) return false;
+      var gid = null;
+      if (it._grp) gid = it.id;            // 已折叠的组卡（id=grp:xxx）
+      else if (it.sourceId) {
+        try {
+          var gd = groupOf(it.sourceId, it.id);
+          if (gd) gid = gd.id;
+        } catch (e) { /* noop */ }
+      }
+      if (!gid) return true;               // 非组成员
+      if (seen[gid]) return false;         // 该组已在墙上 → 跳过
+      seen[gid] = true;
+      return true;
+    });
+  }
+
   // ---- 主成员质量比较（决策 5：番号>标题长>封面非占位>更新时间>源序）----
   var CODE_RE = /[A-Za-z]{2,6}\s*-?\s*\d{2,6}/;
   function qualityScore(meta) {
@@ -5729,6 +5754,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   V.aggregations = {
     isGroupId: isGroupId,
     groupOf: groupOf,
+    dedupWallItems: dedupWallItems,   // v0.6.72 用户需求：组内成员墙上去重（只显示组）
     getGroup: getGroup,
     getGroups: function () { load(); return map.groups; },
     createGroup: createGroup,
@@ -8758,8 +8784,19 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
 
   /** 网格容器（已含卡片）；items 为空 → 空状态（opts.empty === false 时不渲染
    *  空态——聚合墙用骨架墙 + 增量追加，空态文案会一直顶在最上面（用户反馈）） */
+  // v0.6.72 用户需求：组内任何视频都不能再独立显示，只能显示组——
+  // 当前墙的聚合组去重 seen（grid 全量重建时重置，appendCards 增量沿用）
+  var grpSeen = {};
+  function dedupItems(items) {
+    if (V.aggregations && V.aggregations.dedupWallItems) {
+      return V.aggregations.dedupWallItems(items, grpSeen);
+    }
+    return items;
+  }
   function grid(items, opts) {
     opts = opts || {};
+    grpSeen = {};   // 新墙 → 组去重状态重置
+    items = dedupItems(items);
     var wrap = V.utils.el('div', { className: 'vshell-wall' + (layout() === 'cover' ? ' is-cover' : '') });
     if (items && items.length) {
       items.forEach(function (it, i) {
@@ -8782,6 +8819,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (!wall || !items || !items.length) return;
     opts = opts || {};
     startIndex = startIndex || 0;
+    items = dedupItems(items);   // v0.6.72：增量追加同样折叠组内成员（沿用当前墙 seen）
+    if (!items.length) return;
     items.forEach(function (it, j) {
       var card = V.videoCard.create(it, { layout: layout(), blacklistMode: !!opts.blacklistMode });
       card.style.setProperty('--i', String((startIndex + j) % 12));
@@ -8860,7 +8899,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
 /* ============================================================
  * agg-ui — 视频聚合二期交互（v0.6.2）
  *   右键菜单：单卡「新增为组 / 添加到组 / 多选」；组卡「添加到组」
- *   多选模式：「新增为一组 / 新增为多组 / 添加到组 / 取消」
+ *   多选模式：「合并为一组 / 新增为多组 / 添加到组 / 取消」
  *   拖拽合并（长按 400ms）：单+单→建组弹窗选标题封面、视频↔组→直接并入、
  *     组+组→合并弹窗选标题封面
  *   组选择弹窗（搜索 + 新建组）
@@ -9380,7 +9419,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       multi.btns.push(b);
       bar.appendChild(b);
     }
-    mk('新增为一组', 'vshell-btn-primary', true, function (ms) { createGroupDlg(ms); });
+    mk('合并为一组', 'vshell-btn-primary', true, function (ms) { createGroupDlg(ms); });
     mk('新增为多组', 'vshell-btn', true, function (ms) {
       var n = 0;
       ms.forEach(function (m) {
@@ -18245,6 +18284,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     // 删除关键词/排除词等**无关变更**也会整排重建（innerHTML='' + 重建 mq →
     // 滚动动画重置闪动）。指纹不变时跳过重建。
     var mqFpLast = '';
+    // v0.6.72：当前墙的聚合组去重 seen（renderMerged 重建时重置，
+    // appendAggItems 增量沿用——同组只显示一张组卡，成员不再独立显示）
+    var grpSeen = {};
     var manualCount = V.characters.videosOf(role.name).length;
     // v0.5.6 第五轮：聚合按角色的**所有关键词**搜索；关键词被删光时兜底角色名
     function aggKws() {
@@ -18612,7 +18654,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       }
       // v0.6.0：聚合卡按 source-feed 取卡顺序（数据源返回顺序 + abcabc 轮转）
       // 追加，不再做播放量降序/本地置顶排序（本地视频已在 collectLocal 置顶）
+      // v0.6.72：增量追加同样折叠组内成员（沿用当前墙 grpSeen，同组只显示一张组卡）
       var fresh = items.slice();
+      if (V.aggregations && V.aggregations.dedupWallItems) {
+        fresh = V.aggregations.dedupWallItems(fresh, grpSeen);
+      }
       var added = 0;
       fresh.forEach(function (it) {
         if (!it || !it.id || renderedIds[it.id]) return;
@@ -18644,7 +18690,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var renderedIds = {};
     function renderMerged() {
       body.innerHTML = '';
+      // v0.6.72：组内成员只显示组（同组第一张折叠成组卡，其余跳过）
+      grpSeen = {};
       var merged = mergedItems();
+      if (V.aggregations && V.aggregations.dedupWallItems) {
+        merged = V.aggregations.dedupWallItems(merged, grpSeen);
+      }
       var host = V.utils.el('div', { className: 'vshell-role-gridhost' });
       body.appendChild(host);
       if (!merged.length) {

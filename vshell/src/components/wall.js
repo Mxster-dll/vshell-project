@@ -40,8 +40,19 @@
 
   /** 网格容器（已含卡片）；items 为空 → 空状态（opts.empty === false 时不渲染
    *  空态——聚合墙用骨架墙 + 增量追加，空态文案会一直顶在最上面（用户反馈）） */
+  // v0.6.72 用户需求：组内任何视频都不能再独立显示，只能显示组——
+  // 当前墙的聚合组去重 seen（grid 全量重建时重置，appendCards 增量沿用）
+  var grpSeen = {};
+  function dedupItems(items) {
+    if (V.aggregations && V.aggregations.dedupWallItems) {
+      return V.aggregations.dedupWallItems(items, grpSeen);
+    }
+    return items;
+  }
   function grid(items, opts) {
     opts = opts || {};
+    grpSeen = {};   // 新墙 → 组去重状态重置
+    items = dedupItems(items);
     var wrap = V.utils.el('div', { className: 'vshell-wall' + (layout() === 'cover' ? ' is-cover' : '') });
     if (items && items.length) {
       items.forEach(function (it, i) {
@@ -64,6 +75,8 @@
     if (!wall || !items || !items.length) return;
     opts = opts || {};
     startIndex = startIndex || 0;
+    items = dedupItems(items);   // v0.6.72：增量追加同样折叠组内成员（沿用当前墙 seen）
+    if (!items.length) return;
     items.forEach(function (it, j) {
       var card = V.videoCard.create(it, { layout: layout(), blacklistMode: !!opts.blacklistMode });
       card.style.setProperty('--i', String((startIndex + j) % 12));

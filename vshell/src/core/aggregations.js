@@ -99,6 +99,31 @@
   }
   function getGroup(gid) { load(); return map.groups[gid] || null; }
 
+  /** v0.6.72 用户需求：组内任何视频都不能再独立显示，只能显示组——
+   *  视频墙渲染前过滤：组成员（或已折叠的组卡）同组只保留第一张
+   *  （组卡 id 或成员折叠得到的组 id），其余跳过。
+   *  seen 由调用方管理生命周期：墙全量重建时传新对象，增量追加沿用
+   *  同一对象（否则已显示的组卡会被再次折叠重复）。 */
+  function dedupWallItems(items, seen) {
+    if (!items || !items.length) return items;
+    seen = seen || {};
+    return items.filter(function (it) {
+      if (!it) return false;
+      var gid = null;
+      if (it._grp) gid = it.id;            // 已折叠的组卡（id=grp:xxx）
+      else if (it.sourceId) {
+        try {
+          var gd = groupOf(it.sourceId, it.id);
+          if (gd) gid = gd.id;
+        } catch (e) { /* noop */ }
+      }
+      if (!gid) return true;               // 非组成员
+      if (seen[gid]) return false;         // 该组已在墙上 → 跳过
+      seen[gid] = true;
+      return true;
+    });
+  }
+
   // ---- 主成员质量比较（决策 5：番号>标题长>封面非占位>更新时间>源序）----
   var CODE_RE = /[A-Za-z]{2,6}\s*-?\s*\d{2,6}/;
   function qualityScore(meta) {
@@ -544,6 +569,7 @@
   V.aggregations = {
     isGroupId: isGroupId,
     groupOf: groupOf,
+    dedupWallItems: dedupWallItems,   // v0.6.72 用户需求：组内成员墙上去重（只显示组）
     getGroup: getGroup,
     getGroups: function () { load(); return map.groups; },
     createGroup: createGroup,
