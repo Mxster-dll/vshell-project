@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.85
+// @version      0.6.86
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.85';
+window.VShell.version = '0.6.86';
 
 /* vshell 入口见 src/app.js */
 
@@ -27053,17 +27053,33 @@ body.vshell-dragging a { pointer-events: none; }
   border-radius: 8px;
 }
 .vshell .vshell-tl-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
   height: 14px;
 }
+/* v0.6.86 用户需求：行文本默认隐藏，悬停行时浮现（绝对定位不占布局） */
 .vshell .vshell-tl-label {
-  width: 62px;
-  flex-shrink: 0;
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: auto;
+  opacity: 0;
+  transition: opacity 0.12s;
+  pointer-events: none;
   font-size: 11px;
   color: var(--vscode-descriptionForeground, #9a9a9a);
-  text-align: right;
+  background: var(--vscode-editorWidget-background, #252526);
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid var(--vscode-panel-border, #3c3c3c);
+  white-space: nowrap;
+}
+.vshell .vshell-tl-row:hover .vshell-tl-label {
+  opacity: 1;
 }
 .vshell .vshell-tl-track {
   position: relative;
