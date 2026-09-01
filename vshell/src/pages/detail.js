@@ -818,6 +818,7 @@
           tlOff = [];
         }
         tlVideo = null; tlEl = null; tlRows = null; tlScanPct = null; tlScanDone = false;
+        tlCacheHist = [];   // v0.6.90 会话内缓存历史随播放器一起清理
         if (player) { try { player.destroy(); } catch (e) { /* noop */ } player = null; }
       };
     }
@@ -939,6 +940,7 @@
     var tlScanPct = null;           // 快扫进度 0-100（onProgress 回调）
     var tlScanDone = false;         // 快扫已结束（onDone）
     var tlOff = [];                 // [ev, fn] 待移除监听
+    var tlCacheHist = [];           // v0.6.90 会话内累计缓冲区间（seek 后旧段保留）
     function tlOn(ev, fn) {
       if (!tlVideo) return;
       tlVideo.addEventListener(ev, fn);
@@ -988,21 +990,22 @@
       });
     }
     function renderCache() {
+      // v0.6.90 累计显示：把当前 buffered 并进会话历史（seek 丢弃的旧段保留），
+      // 渲染全部缓冲过的区间（多段）
+      var b = tlVideo && tlVideo.buffered;
+      if (b && b.length) {
+        for (var i = 0; i < b.length; i++) {
+          try {
+            tlCacheHist = V.playHistory._merge(tlCacheHist, b.start(i), b.end(i));
+          } catch (e) { /* noop */ }
+        }
+      }
       var track = tlRows && tlRows.cache && tlRows.cache.track;
       if (!track) return;
       track.innerHTML = '';
       var dur = tlDur();
-      if (!dur || !tlVideo) return;
-      // 与 player.js bufferedPct 同款：缓冲前沿 = 最后 range 末端，
-      // 画成从 0 开始的单条连续区间（卡片进度条同款视觉，随缓冲增长）
-      var b = tlVideo.buffered;
-      var end = 0;
-      if (b && b.length) {
-        try { end = b.end(b.length - 1); } catch (e) { end = 0; }
-      }
-      if (end > 0.1) {
-        renderSegs(tlRows.cache, [{ s: 0, e: Math.min(end, dur) }], dur);
-      }
+      if (!dur) return;
+      renderSegs(tlRows.cache, tlCacheHist, dur);
     }
     function renderPlayed() {
       var track = tlRows && tlRows.played && tlRows.played.track;
@@ -1041,6 +1044,7 @@
     }
     function buildTimeline() {
       tlScanPct = null; tlScanDone = false;
+      tlCacheHist = [];
       var tlLastPlayedRender = -1;   // 已播段实时刷新节流（timeupdate 回调闭包）
       var tlLastCacheRender = -1;    // 缓存段实时刷新节流（同）
       // v0.6.87：三行纯色条 + 底部图例（色块+名称，常驻）——不再用行内悬停 label

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.89
+// @version      0.6.90
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.89';
+window.VShell.version = '0.6.90';
 
 /* vshell 入口见 src/app.js */
 
@@ -16295,6 +16295,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           tlOff = [];
         }
         tlVideo = null; tlEl = null; tlRows = null; tlScanPct = null; tlScanDone = false;
+        tlCacheHist = [];   // v0.6.90 会话内缓存历史随播放器一起清理
         if (player) { try { player.destroy(); } catch (e) { /* noop */ } player = null; }
       };
     }
@@ -16416,6 +16417,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var tlScanPct = null;           // 快扫进度 0-100（onProgress 回调）
     var tlScanDone = false;         // 快扫已结束（onDone）
     var tlOff = [];                 // [ev, fn] 待移除监听
+    var tlCacheHist = [];           // v0.6.90 会话内累计缓冲区间（seek 后旧段保留）
     function tlOn(ev, fn) {
       if (!tlVideo) return;
       tlVideo.addEventListener(ev, fn);
@@ -16465,21 +16467,22 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       });
     }
     function renderCache() {
+      // v0.6.90 累计显示：把当前 buffered 并进会话历史（seek 丢弃的旧段保留），
+      // 渲染全部缓冲过的区间（多段）
+      var b = tlVideo && tlVideo.buffered;
+      if (b && b.length) {
+        for (var i = 0; i < b.length; i++) {
+          try {
+            tlCacheHist = V.playHistory._merge(tlCacheHist, b.start(i), b.end(i));
+          } catch (e) { /* noop */ }
+        }
+      }
       var track = tlRows && tlRows.cache && tlRows.cache.track;
       if (!track) return;
       track.innerHTML = '';
       var dur = tlDur();
-      if (!dur || !tlVideo) return;
-      // 与 player.js bufferedPct 同款：缓冲前沿 = 最后 range 末端，
-      // 画成从 0 开始的单条连续区间（卡片进度条同款视觉，随缓冲增长）
-      var b = tlVideo.buffered;
-      var end = 0;
-      if (b && b.length) {
-        try { end = b.end(b.length - 1); } catch (e) { end = 0; }
-      }
-      if (end > 0.1) {
-        renderSegs(tlRows.cache, [{ s: 0, e: Math.min(end, dur) }], dur);
-      }
+      if (!dur) return;
+      renderSegs(tlRows.cache, tlCacheHist, dur);
     }
     function renderPlayed() {
       var track = tlRows && tlRows.played && tlRows.played.track;
@@ -16518,6 +16521,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     }
     function buildTimeline() {
       tlScanPct = null; tlScanDone = false;
+      tlCacheHist = [];
       var tlLastPlayedRender = -1;   // 已播段实时刷新节流（timeupdate 回调闭包）
       var tlLastCacheRender = -1;    // 缓存段实时刷新节流（同）
       // v0.6.87：三行纯色条 + 底部图例（色块+名称，常驻）——不再用行内悬停 label
