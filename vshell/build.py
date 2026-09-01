@@ -36,7 +36,6 @@ JS_FILES = [
     "core/viewmode.js",
     "core/cardgap.js",         # v0.5.6 用户需求：卡片间距拖动条（--vshell-card-gap）
     "core/cardsize.js",        # v0.6.69 用户需求：视频卡片大小拖动条（--vshell-card-min）
-    "core/smoothscroll.js",    # v0.6.73 用户需求：视频墙平滑滚动（rAF 插值；scrollbridge 滚轮桥入口）
     "core/scrollbridge.js",    # v0.5.6 Flutter 壳滚轮桥（__VS_SCROLL__）
     "core/theme.js",
     "core/localvideos.js",     # v0.5.6 第十二轮：本地视频数据源
