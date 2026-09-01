@@ -251,32 +251,55 @@
 
   /* ---------------- 建组弹窗（≥2 成员选标题封面；1 成员直接建） ---------------- */
   function createGroupDlg(members) {
-    // v0.6.5 组卡多选后「新增为一组」：组是聚合容器不能当成员——过滤组项
-    members = (members || []).filter(function (m) { return !isGrp(m); });
-    if (!members.length) return;
+    // v0.6.82：组卡不再过滤——多选「合并为一组」混入组卡时（用户反馈
+    // "卡片还在显示，预期只剩一个"），把组卡的**成员展开**并入新组，
+    // 旧组删除（mergeGroups 语义）。单卡直接成为成员。
+    // 弹窗候选保留单卡 + 组卡本身（组有 title/cover 可作新组标题封面）。
+    var gidGone = [];
+    var flat = [];       // 建组成员（组卡展开）
+    var candsSrc = [];   // 弹窗候选（单卡 + 组卡，保留元数据）
+    (members || []).forEach(function (m) {
+      if (isGrp(m)) {
+        (m.members || []).forEach(function (mm) { flat.push({ src: mm.src, id: mm.id }); });
+        gidGone.push(m.id);
+        candsSrc.push(m);
+      } else {
+        flat.push({ src: m.src, id: m.id });
+        candsSrc.push(m);
+      }
+    });
+    // 去重（组卡成员可能与单卡重复）
+    var seen = {};
+    flat = flat.filter(function (x) {
+      var k = x.src + ':' + x.id;
+      if (seen[k]) return false;
+      seen[k] = true;
+      return true;
+    });
+    if (!flat.length) return;
+    members = flat;
     var A = V.aggregations;
     if (members.length === 1) {
       var m0 = members[0];
-      if (isGrp(m0)) return;
       var gid = A.createGroup([{ src: m0.src, id: m0.id }], {
         title: m0.title || m0.id,
         cover: m0.pic || '',
         coverSrc: m0.sourceId || m0.src,
         auto: false,
       });
-      if (gid) { toast('已创建组：' + (m0.title || ''), true); A.migrateStates(gid); refreshAfterGroupOp(gid); }
+      if (gid) { toast('已创建组：' + (m0.title || ''), true); finishGroupCreate(gid, gidGone); }
       return;
     }
-    // ≥2：弹窗选标题封面（默认质量优：有封面 > 标题长）
-    var cands = members.map(function (m, i) {
-      return { m: m, i: i, sc: (m.pic ? 500 : 0) + Math.min(1000, (m.title || '').length) };
+    // ≥2：弹窗选标题封面（候选含组卡：默认质量优：有封面 > 标题长）
+    var cands = candsSrc.map(function (m, i) {
+      return { m: m, i: i, sc: (m.pic || m.cover ? 500 : 0) + Math.min(1000, (m.title || '').length) };
     });
     cands.sort(function (a, b) { return b.sc - a.sc; });
     var defIdx = cands[0].i;
     var body = V.utils.el('div', { className: 'vshell-agg-cand' });
     var list = V.utils.el('div', { className: 'vshell-agg-cand-list' });
     var rows = [];
-    members.forEach(function (m, i) {
+    candsSrc.forEach(function (m, i) {
       var row = V.utils.el('label', {
         className: 'vshell-agg-cand-row' + (i === defIdx ? ' is-on' : ''),
       }, [
@@ -284,7 +307,7 @@
           type: 'radio', name: 'aggcand', className: 'vshell-agg-cand-radio',
           checked: i === defIdx ? true : undefined,
         }),
-        coverEl(m.pic, 'vshell-agg-cand-cover', m.sourceId || m.src, m),
+        coverEl(m.pic || m.cover, 'vshell-agg-cand-cover', m.sourceId || m.src, m),
         V.utils.el('span', { className: 'vshell-agg-cand-info' }, [
           V.utils.el('span', { className: 'vshell-agg-cand-title' }, m.title || '（无标题）'),
           V.utils.el('span', { className: 'vshell-agg-cand-src' }, m.sourceId || m.src || ''),
@@ -308,17 +331,34 @@
       footBtn('创建组', 'vshell-btn-primary', function () {
         var sel = defIdx;
         rows.forEach(function (r, i) { if (r.classList.contains('is-on')) sel = i; });
-        var m = members[sel];
+        var m = candsSrc[sel];
         var gid = A.createGroup(members.map(function (x) { return { src: x.src, id: x.id }; }), {
           title: cust.value.trim() || m.title || m.id,
-          cover: m.pic || '',
+          cover: m.pic || m.cover || '',
           coverSrc: m.sourceId || m.src,
           auto: false,
         });
         dlg.close();
-        if (gid) { toast('已创建组：' + (cust.value.trim() || m.title || ''), true); A.migrateStates(gid); refreshAfterGroupOp(gid); }
+        if (gid) { toast('已创建组：' + (cust.value.trim() || m.title || ''), true); finishGroupCreate(gid, gidGone); }
       }),
     ]);
+  }
+
+  /** v0.6.82：建组成功后统一收尾——若本次展开并吞掉了旧组（gidGone），
+   *  迁移旧组状态到新组 + 删除旧组 + 页面合并刷新（旧组卡消失、成员折叠
+   *  进新组卡）；否则仅迁移本组状态 + 局部折叠。 */
+  function finishGroupCreate(gid, gidGone) {
+    var A = V.aggregations;
+    if (gidGone && gidGone.length) {
+      try { A.migrateStates(gid, gidGone); } catch (e) { /* noop */ }
+      gidGone.forEach(function (g2) {
+        try { A.removeGroup(g2); } catch (e) { /* noop */ }
+        try { refreshAfterMerge(gid, g2); } catch (e) { /* noop */ }
+      });
+    } else {
+      try { A.migrateStates(gid); } catch (e) { /* noop */ }
+      refreshAfterGroupOp(gid);
+    }
   }
 
   /* ---------------- 合并组弹窗（选标题封面） ---------------- */
