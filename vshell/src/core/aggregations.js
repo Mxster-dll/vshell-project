@@ -22,7 +22,13 @@
   var V = window.VShell = window.VShell || {};
   var KEY = 'aggregations';
   var GID_PREFIX = 'grp:';
-  var PHASH_DIST = 10;          // 64 位汉明距离阈值（~15%）
+  var PHASH_DIST = 6;           // 64 位汉明距离阈值。v0.6.60：10 → 6（实测
+                                // kkav 成人缩略图构图相似（人脸/身体特写、
+                                // 相近色调），16×16 灰度 phash 距离 7-10 的
+                                // 碰撞率很高 → 不同视频被误组合（「娜娜写真」
+                                // 与「棒棒糖/清纯大学生/群P」并为一组）。
+                                // 同一视频不同版本封面相同/极似（距离 0-4），
+                                // 收紧到 6 不影响真匹配，显著减少误组合。
   var listeners = [];
   var map = null;               // 惰性加载
   var scanned = {};             // 'src:id' → 已入队/已算（会话级去重）
@@ -435,6 +441,33 @@
       doScan(job).then(function () { scanRunning = false; pumpScan(); });
     }, 250);   // 节流，避免首屏抢 CPU
   }
+  /** v0.6.60：标题相关性判定。同一视频不同版本的标题必含共同 token
+   *  （人名/番号/长词）；封面 phash 相似但标题无关 → 不同内容——成人
+   *  缩略图同构构图（中央人物+标题条+相近色调）致 16×16 灰度均值哈希
+   *  碰撞严重（实测 PHASH_DIST=6 时 10 人组仍混入「柚子猫/饼干姐姐/
+   *  林允儿/探花」等无关视频），仅靠 phash 无法区分。宁漏勿滥。
+   *  中文按空格/标点分隔成片段（成人标题的短语结构），英文/数字串 ≥3。 */
+  var TITLE_STOP = {          // v0.6.61：通用模板词（无区分度，常见于所有
+    '性爱视频流出': 1, '视频流出': 1, '高清无码': 1, '中文字幕': 1,   // 标题，不作为相关性证据）
+    '无码流出': 1, '国语中字': 1, '在线观看': 1, '无码视频': 1,
+    '在线视频': 1, '高清视频': 1, '国产自拍': 1, '精品视频': 1,
+  };
+  function titleTokens(t) {
+    var out = {};
+    var s = String(t || '').replace(/[，。！？、；：""''（）()【】\[\]·\-—_]/g, ' ');
+    var cn = s.match(/[\u4e00-\u9fa5]{3,}/g) || [];
+    cn.forEach(function (w) { if (!TITLE_STOP[w]) out[w] = 1; });
+    var en = s.match(/[A-Za-z0-9][A-Za-z0-9\-]{2,}/g) || [];
+    en.forEach(function (w) { out[w.toLowerCase()] = 1; });
+    return out;
+  }
+  function titleRelated(a, b) {
+    if (!a || !b) return false;
+    var ta = titleTokens(a), tb = titleTokens(b);
+    for (var k in ta) { if (tb[k]) return true; }
+    return false;
+  }
+
   function doScan(job) {
     var item = job.item, srcId = job.srcId;
     if (!srcId) return Promise.resolve();
@@ -449,7 +482,9 @@
           // v0.6.51：自动扫描只并入自动组——手动组是用户精心挑选的，
           // 不能自动灌入相似封面视频（曾致手动组「不再是当初添加的视频」）
           if (gd.auto === false) continue;
-          if (gd.repPhash && phashInfoValid(gd.repPhash) && hamming(h, gd.repPhash) <= PHASH_DIST) {
+          if (gd.repPhash && phashInfoValid(gd.repPhash)
+            && hamming(h, gd.repPhash) <= PHASH_DIST
+            && titleRelated(item.title, gd.title)) {   // v0.6.60：封面相似+标题相关才并入
             addToGroup(g, { src: srcId, id: item.id });
             return;
           }
@@ -457,7 +492,8 @@
         var pend = map.pending;
         for (var k in pend) {                                  // 视频 vs 视频 → 自动建组
           var p = pend[k];
-          if (p && p.h && phashInfoValid(p.h) && hamming(h, p.h) <= PHASH_DIST) {
+          if (p && p.h && phashInfoValid(p.h) && hamming(h, p.h) <= PHASH_DIST
+            && titleRelated(item.title, p.t)) {        // v0.6.60：封面相似+标题相关才自动建组
             var ci = k.indexOf(':');
             var m2 = { src: k.slice(0, ci), id: k.slice(ci + 1) };
             var meta = {};
