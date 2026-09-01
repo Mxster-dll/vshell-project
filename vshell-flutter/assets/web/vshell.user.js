@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.97
+// @version      0.6.100
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.97';
+window.VShell.version = '0.6.100';
 
 /* vshell 入口见 src/app.js */
 
@@ -13668,6 +13668,130 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     return cleanup;
   }
 
+  /* ---------- 缓存驱动识别：scanRanges(playInfo, opts) → stop ----------
+   * v0.6.98 用户需求：任何时候只要缓存数据有新增，就利用这部分缓存
+   * 建立分镜识别。对已缓冲区间（主视频 buffered ∪ 悬停预览 buffered）
+   * 串行 seek → 采样分析：已缓冲字节是本地读，seek 即时出帧、不占网络，
+   * 比等待播放到该位置更早产出节点。
+   * opts: { id, container, ranges:[{s,e}], onProgress(coveredRanges), onDone }
+   * 返回 stop()。与快扫（全片 8x 慢扫）并行互补：快扫覆盖全片、本扫描
+   * 即时覆盖已缓存区间；节点同存 shots3.<id>（mergeUnique 合并）。
+   * 只支持直链源（durl/dash.video）；HLS（17c）无直链 → 空跑安全降级。 */
+  function scanRanges(playInfo, opts) {
+    var id = opts && opts.id;
+    var box = opts && opts.container;
+    if (!id || !playInfo || !box) return function () {};
+    var ranges = (opts.ranges || []).filter(function (r) {
+      return r && isFinite(r.s) && isFinite(r.e) && r.e - r.s >= TS;
+    }).sort(function (a, b) { return a.s - b.s; });
+    if (!ranges.length) return function () {};
+    var video = null;
+    var an = new Analyzer();
+    var cached = get(id);
+    if (cached) an.shots = cached.slice();
+    var finished = false;
+    var idx = 0;
+    var doneRanges = [];          // 已完成的区间（进度覆盖用）
+    var RATE = 4;                 // 本地字节 seek 即时，固定 4x 加速
+    var SAMPLE_INT = 250;         // 采样间隔（4x → 视频时间 1s/采样，与快扫同密度）
+    var sampler = null;
+    var lastT = 0;                // 防卡：上一采样视频时间
+    var lastAdv = Date.now();     // 防卡：最后一次视频时间推进时刻
+    var mdTimer = null;           // loadedmetadata 超时兜底（video 加载异常时释放 busy）
+
+    function covered() {
+      var out = doneRanges.slice();
+      if (idx < ranges.length) {
+        var r = ranges[idx];
+        var t = video ? video.currentTime : r.s;
+        if (t > r.s + 0.3) out.push({ s: r.s, e: Math.min(t, r.e) });
+      }
+      return out;
+    }
+    function progress() {
+      if (opts.onProgress) { try { opts.onProgress(covered()); } catch (e) { /* noop */ } }
+    }
+    function cleanup() {
+      finished = true;
+      if (mdTimer) { clearTimeout(mdTimer); mdTimer = null; }
+      if (sampler) { clearInterval(sampler); sampler = null; }
+      if (video) { video.pause(); video.removeAttribute('src'); video.load(); }
+      if (video && video.parentNode) video.parentNode.removeChild(video);
+      video = null;
+    }
+    function finish() {
+      if (finished) return;
+      finished = true;
+      save(id, an.shots);
+      if (opts.onDone) { try { opts.onDone(); } catch (e) { /* noop */ } }
+      cleanup();
+    }
+    function startRange() {
+      if (finished) return;
+      if (idx >= ranges.length) { finish(); return; }
+      var r = ranges[idx];
+      try { video.currentTime = r.s; } catch (e) { /* noop */ }
+      video.play().catch(function () { /* autoplay 拒绝：seek 兜底 */ });
+    }
+    function samplerTick() {
+      if (finished || !video) return;
+      if (Date.now() - lastAdv > 15000) { finish(); return; }   // 15s 无推进 → 放弃（防卡死占 busy）
+      var r = ranges[idx];
+      if (!r) { finish(); return; }
+      if (video.readyState < 2) return;
+      var t = video.currentTime;
+      if (t >= r.e - 0.05) {
+        // 区间完成：记入 doneRanges → 下一个
+        video.pause();
+        doneRanges.push(r);
+        idx++;
+        progress();
+        startRange();
+        return;
+      }
+      if (Math.abs(t - lastT) > 0.05) { lastAdv = Date.now(); lastT = t; }
+      // v0.6.99 防卡：autoplay 被拒（无用户交互）时 video 保持 paused——
+      // 已缓冲字节是本地读，seek 即时出帧，seek 步进同样能采样，不依赖播放
+      if (video.paused) {
+        try { video.currentTime = Math.min(r.e - 0.1, t + 1); } catch (e) { /* noop */ }
+      }
+      var feat = null;
+      try { feat = sample(video, 'cachescan'); } catch (e) { feat = null; }
+      if (feat) {
+        var news = an.ingest(feat);
+        if (news.length) save(id, an.shots);
+      }
+      progress();
+    }
+    try {
+      video = V.utils.el('video', { muted: '', playsinline: '', preload: 'metadata', crossorigin: 'anonymous' });
+      box.appendChild(video);
+      video.muted = true;
+      var src = null;
+      if (playInfo.type === 'durl' && playInfo.durl && playInfo.durl.length) src = playInfo.durl[0].url;
+      else if (playInfo.dash && playInfo.dash.video) src = playInfo.dash.video.url;
+      if (!src) { finish(); return cleanup; }
+      // loadedmetadata 超时兜底：video 加载异常（不触发任何事件）时释放 busy
+      mdTimer = setTimeout(function () {
+        if (!finished && (!video || video.readyState < 2)) finish();
+      }, 15000);
+      video.addEventListener('loadedmetadata', function () {
+        if (finished) return;
+        if (mdTimer) { clearTimeout(mdTimer); mdTimer = null; }
+        try { video.playbackRate = RATE; } catch (e) { /* noop */ }
+        sampler = setInterval(samplerTick, SAMPLE_INT);
+        startRange();
+      });
+      video.addEventListener('error', function () { finish(); });
+      video.src = src;
+      video.load();
+    } catch (e) {
+      cleanup();
+      if (!finished) { finished = true; if (opts.onDone) opts.onDone(); }
+    }
+    return cleanup;
+  }
+
   /* ---------- 间隔约束 + 回溯（用户需求 v0.1.6） ----------
    * 两个节点最小间隔 ts（可选；ts<=0 关闭约束）。间隔不足时比较差异度 s，
    * **保留更大的那个**；被顶替的节点进入「坟墓」，之后若它与相邻节点的
@@ -13893,7 +14017,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     get: get, set: set,
     isScanned: isScanned,
     clear: function (id) { V.store.del(KEY + id); V.store.del(SCANNED_KEY + id); },
-    attach: attach, scan: scan,
+    attach: attach, scan: scan, scanRanges: scanRanges,
     renderNodes: renderNodes,
     updateProgress: updateProgress,
     /* 最小节点间隔（秒，可选；0 关闭约束）；持久化 store 'shots.gap' */
@@ -16319,6 +16443,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         }
         tlVideo = null; tlEl = null; tlRows = null; tlScanPct = null; tlScanDone = false;
         tlCacheHist = [];   // v0.6.90 会话内缓存历史随播放器一起清理
+        stopCacheScan();    // v0.6.98 缓存驱动识别随播放器一起清理
         if (player) { try { player.destroy(); } catch (e) { /* noop */ } player = null; }
       };
     }
@@ -16441,6 +16566,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var tlScanDone = false;         // 快扫已结束（onDone）
     var tlOff = [];                 // [ev, fn] 待移除监听
     var tlCacheHist = [];           // v0.6.90 会话内累计缓冲区间（seek 后旧段保留）
+    // v0.6.98 缓存驱动识别：缓存新增 → 用这部分缓存做分镜识别
+    var cacheScanStop = null, cacheScanBusy = false, cacheScanWin = null;
+    var scannedRanges = [];         // 会话级已完成识别的缓存区间（识别行显示）
     function tlOn(ev, fn) {
       if (!tlVideo) return;
       tlVideo.addEventListener(ev, fn);
@@ -16536,6 +16664,52 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       var dur = tlDur();
       if (!dur) return;
       renderSegs(tlRows.cache, tlCacheHist, dur);
+      // v0.6.98 缓存新增即触发分镜识别（利用已缓冲字节本地 seek 即时出帧）
+      feedCacheScan();
+    }
+    // v0.6.98 把缓存并集中「未识别」的区间交给 scanRanges 串行扫描
+    function feedCacheScan() {
+      if (cacheScanBusy || !playInfo || !V.shots.scanRanges) return;
+      if (!tlCacheHist || !tlCacheHist.length) return;
+      // 直链守卫：HLS（17c）无 durl/dash 直链，scanRanges 空跑会立即
+      // onDone → feedCacheScan 死循环；无直链源跳过缓存驱动识别
+      var hasSrc = (playInfo.type === 'durl' && playInfo.durl && playInfo.durl.length) ||
+        (playInfo.dash && playInfo.dash.video);
+      if (!hasSrc) return;
+      var todo = [];
+      tlCacheHist.forEach(function (r) {
+        var covered = false;
+        for (var i = 0; i < scannedRanges.length && !covered; i++) {
+          var c = scannedRanges[i];
+          if (c.s <= r.s + 0.3 && c.e >= r.e - 0.3) covered = true;
+        }
+        if (!covered) todo.push({ s: r.s, e: r.e });
+      });
+      if (!todo.length) return;
+      cacheScanBusy = true;
+      if (!cacheScanWin) {
+        cacheScanWin = V.utils.el('div', { className: 'vshell-scan-window' });
+        if (player && player.root) player.root.appendChild(cacheScanWin);
+      }
+      cacheScanStop = V.shots.scanRanges(playInfo, {
+        id: id, container: cacheScanWin, ranges: todo,
+        onProgress: function (coveredRanges) {
+          scannedRanges = coveredRanges;
+          renderIdentified();
+        },
+        onDone: function () {
+          cacheScanBusy = false;
+          cacheScanStop = null;
+          renderIdentified();
+          feedCacheScan();   // 队列续扫（扫描期间又有新缓存）
+        },
+      });
+    }
+    function stopCacheScan() {
+      if (cacheScanStop) { try { cacheScanStop(); } catch (e) { /* noop */ } cacheScanStop = null; }
+      cacheScanBusy = false;
+      if (cacheScanWin) { try { cacheScanWin.remove(); } catch (e) { /* noop */ } cacheScanWin = null; }
+      scannedRanges = [];
     }
     function renderPlayed() {
       var track = tlRows && tlRows.played && tlRows.played.track;
@@ -16557,6 +16731,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       var covered = null;
       if (tlScanDone && (V.shots.get(id) || V.shots.isScanned(id))) {
         covered = [0, dur];                       // 快扫完成/已识别 → 整条
+      } else if (scannedRanges && scannedRanges.length) {
+        // v0.6.98 缓存驱动识别：显示已识别的缓存区间（缓存新增即扫）
+        renderSegs(tlRows.scan, scannedRanges, dur);
+        return;
       } else if (tlScanPct != null && !tlScanDone) {
         covered = [0, (tlScanPct / 100) * dur];   // 快扫进行中 → 扫到哪画到哪
       } else {
@@ -16677,6 +16855,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           onProgress: function (pct) { tlScanPct = pct; renderIdentified(); },
           onDone: function () {
             tlScanDone = true;
+            stopCacheScan();    // v0.6.98 快扫完成=全片已识别，缓存驱动识别冗余
             renderIdentified();
             hideScanProgress();
             render();
@@ -16692,6 +16871,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       if (shotsStopScan) { try { shotsStopScan(); } catch (e) {} shotsStopScan = null; }
       if (shotsDetach) { try { shotsDetach(); } catch (e) {} shotsDetach = null; }
       hideScanProgress();
+      stopCacheScan();   // v0.6.98 重新识别：缓存驱动扫描一并重置
       V.shots.clear(id);
       setupShots(playInfo);
       V.toast.info('已清除分镜缓存，重新识别中…');

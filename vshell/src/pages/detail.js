@@ -819,6 +819,7 @@
         }
         tlVideo = null; tlEl = null; tlRows = null; tlScanPct = null; tlScanDone = false;
         tlCacheHist = [];   // v0.6.90 会话内缓存历史随播放器一起清理
+        stopCacheScan();    // v0.6.98 缓存驱动识别随播放器一起清理
         if (player) { try { player.destroy(); } catch (e) { /* noop */ } player = null; }
       };
     }
@@ -941,6 +942,9 @@
     var tlScanDone = false;         // 快扫已结束（onDone）
     var tlOff = [];                 // [ev, fn] 待移除监听
     var tlCacheHist = [];           // v0.6.90 会话内累计缓冲区间（seek 后旧段保留）
+    // v0.6.98 缓存驱动识别：缓存新增 → 用这部分缓存做分镜识别
+    var cacheScanStop = null, cacheScanBusy = false, cacheScanWin = null;
+    var scannedRanges = [];         // 会话级已完成识别的缓存区间（识别行显示）
     function tlOn(ev, fn) {
       if (!tlVideo) return;
       tlVideo.addEventListener(ev, fn);
@@ -1036,6 +1040,52 @@
       var dur = tlDur();
       if (!dur) return;
       renderSegs(tlRows.cache, tlCacheHist, dur);
+      // v0.6.98 缓存新增即触发分镜识别（利用已缓冲字节本地 seek 即时出帧）
+      feedCacheScan();
+    }
+    // v0.6.98 把缓存并集中「未识别」的区间交给 scanRanges 串行扫描
+    function feedCacheScan() {
+      if (cacheScanBusy || !playInfo || !V.shots.scanRanges) return;
+      if (!tlCacheHist || !tlCacheHist.length) return;
+      // 直链守卫：HLS（17c）无 durl/dash 直链，scanRanges 空跑会立即
+      // onDone → feedCacheScan 死循环；无直链源跳过缓存驱动识别
+      var hasSrc = (playInfo.type === 'durl' && playInfo.durl && playInfo.durl.length) ||
+        (playInfo.dash && playInfo.dash.video);
+      if (!hasSrc) return;
+      var todo = [];
+      tlCacheHist.forEach(function (r) {
+        var covered = false;
+        for (var i = 0; i < scannedRanges.length && !covered; i++) {
+          var c = scannedRanges[i];
+          if (c.s <= r.s + 0.3 && c.e >= r.e - 0.3) covered = true;
+        }
+        if (!covered) todo.push({ s: r.s, e: r.e });
+      });
+      if (!todo.length) return;
+      cacheScanBusy = true;
+      if (!cacheScanWin) {
+        cacheScanWin = V.utils.el('div', { className: 'vshell-scan-window' });
+        if (player && player.root) player.root.appendChild(cacheScanWin);
+      }
+      cacheScanStop = V.shots.scanRanges(playInfo, {
+        id: id, container: cacheScanWin, ranges: todo,
+        onProgress: function (coveredRanges) {
+          scannedRanges = coveredRanges;
+          renderIdentified();
+        },
+        onDone: function () {
+          cacheScanBusy = false;
+          cacheScanStop = null;
+          renderIdentified();
+          feedCacheScan();   // 队列续扫（扫描期间又有新缓存）
+        },
+      });
+    }
+    function stopCacheScan() {
+      if (cacheScanStop) { try { cacheScanStop(); } catch (e) { /* noop */ } cacheScanStop = null; }
+      cacheScanBusy = false;
+      if (cacheScanWin) { try { cacheScanWin.remove(); } catch (e) { /* noop */ } cacheScanWin = null; }
+      scannedRanges = [];
     }
     function renderPlayed() {
       var track = tlRows && tlRows.played && tlRows.played.track;
@@ -1057,6 +1107,10 @@
       var covered = null;
       if (tlScanDone && (V.shots.get(id) || V.shots.isScanned(id))) {
         covered = [0, dur];                       // 快扫完成/已识别 → 整条
+      } else if (scannedRanges && scannedRanges.length) {
+        // v0.6.98 缓存驱动识别：显示已识别的缓存区间（缓存新增即扫）
+        renderSegs(tlRows.scan, scannedRanges, dur);
+        return;
       } else if (tlScanPct != null && !tlScanDone) {
         covered = [0, (tlScanPct / 100) * dur];   // 快扫进行中 → 扫到哪画到哪
       } else {
@@ -1177,6 +1231,7 @@
           onProgress: function (pct) { tlScanPct = pct; renderIdentified(); },
           onDone: function () {
             tlScanDone = true;
+            stopCacheScan();    // v0.6.98 快扫完成=全片已识别，缓存驱动识别冗余
             renderIdentified();
             hideScanProgress();
             render();
@@ -1192,6 +1247,7 @@
       if (shotsStopScan) { try { shotsStopScan(); } catch (e) {} shotsStopScan = null; }
       if (shotsDetach) { try { shotsDetach(); } catch (e) {} shotsDetach = null; }
       hideScanProgress();
+      stopCacheScan();   // v0.6.98 重新识别：缓存驱动扫描一并重置
       V.shots.clear(id);
       setupShots(playInfo);
       V.toast.info('已清除分镜缓存，重新识别中…');
