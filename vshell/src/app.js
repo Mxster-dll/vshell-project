@@ -8,6 +8,12 @@
   'use strict';
   var V = window.VShell = window.VShell || {};
 
+  // 滚动位置由本项目自己管理（recordScroll/restoreScroll 按路由保存恢复），
+  // 禁用 Chromium 的 scroll restoration——否则页面加载/hash 导航时浏览器
+  // 会把 scrollTop 拉回上次会话值（实测 676 干扰，与项目恢复双重打架，
+  // 并打断平滑滚动动画）
+  try { history.scrollRestoration = 'manual'; } catch (e) { /* 忽略 */ }
+
   var PAGE_NAMES = ['home', 'category', 'video', 'watchlist', 'downloads', 'search', 'searchtags', 'blacklist', 'role', 'settings'];
   var current = null;
   var prevRoute = null;

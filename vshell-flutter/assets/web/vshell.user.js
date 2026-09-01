@@ -3867,9 +3867,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   'use strict';
   var V = window.VShell = window.VShell || {};
 
-  var TAU = 38;   // 指数衰减时间常数 ms（帧时间无关：f = 1 - e^(-dt/TAU)）
-                  // 38ms → 50% 在 26ms、95% 在 114ms：平滑且干脆，无拖尾
-  var SNAP = 6;   // 收尾阈值 px：剩余距离小于该值直接落位（消除慢尾巴）
+  var TAU = 30;   // 指数衰减时间常数 ms（帧时间无关：f = 1 - e^(-dt/TAU)）
+                  // 30ms → 50% 在 21ms、95% 在 90ms：只负责补齐剩余增量，干脆不拖
+  var SNAP = 12;  // 收尾阈值 px：剩余距离小于该值直接落位（消除慢尾巴）
+  var INSTANT = 0.5;  // 滚轮增量即时响应比例：立即移动 50%（跟手），
+                      // 其余 50% 平滑补齐（v0.6.74 用户反馈"很阻滞"的修复）
 
   var states = (typeof WeakMap === 'function') ? new WeakMap() : null;
   function getState(el) {
@@ -3904,14 +3906,26 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     s.raf = requestAnimationFrame(function (n) { tick(el, s, n); });
   }
 
-  /** 平滑滚动：dy = 目标增量（像素）。容器不可滚/无增量返回 false。 */
+  /** 平滑滚动：dy = 目标增量（像素）。容器不可滚/无增量返回 false。
+   *  即时响应：增量立即移动 INSTANT 比例（跟手、消除"阻滞"），
+   *  剩余部分由指数衰减动画平滑补齐（无跳变）。
+   *  动画中 target 必须累加全量 dy（而非 rest）：位置已即时推进
+   *  instant，target 相对位置应增加 rest——用 dy 累加后 diff 自然
+   *  等于「旧未追量 + rest」，否则即时位移会与 rest 抵消导致输入
+   *  丢失（实测 200+200 只滚 300，最终位置少一个 rest）。 */
   function scrollBy(el, dy) {
     if (!el || !dy || el.scrollHeight <= el.clientHeight + 1) return false;
     var s = getState(el);
-    if (!s.raf) s.target = el.scrollTop;
-    s.target = clampNum(s.target + dy, 0, maxTop(el));
+    var instant = dy * INSTANT;
+    // 立即移动一部分——滚轮响应不延迟（v0.6.74 用户反馈"很阻滞"：
+    // 纯指数衰减起始慢+尾部磨蹭）
+    el.scrollTop = clampNum(el.scrollTop + instant, 0, maxTop(el));
+    // 剩余部分进动画目标，平滑收尾
+    if (!s.raf) s.target = el.scrollTop;           // 动画未跑：目标=位置+rest
+    s.target = clampNum(s.target + (s.raf ? dy : dy - instant), 0, maxTop(el));
     if (!s.raf) {
       var elRef = el, sRef = s;
+      s.last = 0;
       s.raf = requestAnimationFrame(function (n) { tick(elRef, sRef, n); });
     }
     return true;
@@ -19853,6 +19867,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
 (function () {
   'use strict';
   var V = window.VShell = window.VShell || {};
+
+  // 滚动位置由本项目自己管理（recordScroll/restoreScroll 按路由保存恢复），
+  // 禁用 Chromium 的 scroll restoration——否则页面加载/hash 导航时浏览器
+  // 会把 scrollTop 拉回上次会话值（实测 676 干扰，与项目恢复双重打架，
+  // 并打断平滑滚动动画）
+  try { history.scrollRestoration = 'manual'; } catch (e) { /* 忽略 */ }
 
   var PAGE_NAMES = ['home', 'category', 'video', 'watchlist', 'downloads', 'search', 'searchtags', 'blacklist', 'role', 'settings'];
   var current = null;
