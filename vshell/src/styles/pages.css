@@ -805,6 +805,48 @@
   opacity: 0.6;
   cursor: default;
 }
+/* v0.6.84 时间轴：播放卡底部三行区间（已缓存/已分镜识别/已播） */
+.vshell .vshell-detail-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 2px 0;
+  padding: 8px 10px;
+  background: var(--vscode-editorWidget-background, rgba(30, 30, 30, 0.6));
+  border: 1px solid var(--vscode-panel-border, #3c3c3c);
+  border-radius: 8px;
+}
+.vshell .vshell-tl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 14px;
+}
+.vshell .vshell-tl-label {
+  width: 62px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #9a9a9a);
+  text-align: right;
+}
+.vshell .vshell-tl-track {
+  position: relative;
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--vscode-progressBar-background, rgba(255, 255, 255, 0.08));
+  overflow: hidden;
+}
+.vshell .vshell-tl-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+}
+/* 行配色：已缓存=蓝 / 已分镜识别=紫 / 已播=绿 */
+.vshell .vshell-tl-row:nth-child(1) .vshell-tl-seg { background: var(--vscode-progressBar-background, #0e639c); }
+.vshell .vshell-tl-row:nth-child(2) .vshell-tl-seg { background: var(--vscode-terminal-ansiMagenta, #c586c0); }
+.vshell .vshell-tl-row:nth-child(3) .vshell-tl-seg { background: var(--vscode-charts-green, #89d185); }
 .vshell-detail-actions {
   display: flex;
   gap: 10px;

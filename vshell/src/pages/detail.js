@@ -770,9 +770,14 @@
       playerCard.appendChild(player.root);
       main.appendChild(playerCard);
 
+      // v0.6.84 时间轴：播放卡底部（操作行之后、简介之前）三行区间——
+      // 已缓存（buffered）/已分镜识别（快扫或边播覆盖）/已播（播放历史分段）
+      buildTimeline();
+
       // 5. 操作行（v0.6.12 静态创建，加载中/空态也可见可用；
       // v0.6.12b：紧贴播放卡片正下方——播放卡后挂回，简介在其后）
       if (akMain) main.appendChild(akMain);
+      if (tlEl) main.appendChild(tlEl);   // v0.6.84 时间轴：操作行之后、简介之前
       refreshSaveBtns();
 
       // 6. 简介（超长折叠）
@@ -804,6 +809,15 @@
         if (shotsDetach) { try { shotsDetach(); } catch (e) { /* noop */ } shotsDetach = null; }
         if (shotsStopScan) { try { shotsStopScan(); } catch (e) { /* noop */ } shotsStopScan = null; }
         hideScanProgress();
+        // v0.6.84 时间轴清理：闭合当前播放段（持久化）+ 移除监听 + 移除 DOM
+        closeSeg();
+        if (tlOff) {
+          for (var ti = 0; ti < tlOff.length; ti++) {
+            try { tlVideo.removeEventListener(tlOff[ti][0], tlOff[ti][1]); } catch (e) { /* noop */ }
+          }
+          tlOff = [];
+        }
+        tlVideo = null; tlEl = null; tlRows = null; tlScanPct = null; tlScanDone = false;
         if (player) { try { player.destroy(); } catch (e) { /* noop */ } player = null; }
       };
     }
@@ -918,6 +932,120 @@
       setupShots(pi);
     }
 
+    // ---- v0.6.84 时间轴：播放卡底部三行区间（已缓存/已分镜识别/已播）----
+    // 每行 = label + track（.vshell-tl-seg 绝对定位区间段），只画有数据的段
+    var tlEl = null, tlRows = {}, tlVideo = null;
+    var curSeg = null;              // 当前播放会话段 {s, e}（播放中延伸，暂停/跳转闭合）
+    var tlScanPct = null;           // 快扫进度 0-100（onProgress 回调）
+    var tlScanDone = false;         // 快扫已结束（onDone）
+    var tlOff = [];                 // [ev, fn] 待移除监听
+    function tlOn(ev, fn) {
+      if (!tlVideo) return;
+      tlVideo.addEventListener(ev, fn);
+      tlOff.push([ev, fn]);
+    }
+    function tlDur() {
+      var d = tlVideo ? tlVideo.duration : 0;
+      if (isFinite(d) && d > 0) return d;
+      return (playInfo && playInfo.duration) || 0;
+    }
+    function tlRow(label, key) {
+      var row = V.utils.el('div', { className: 'vshell-tl-row' }, [
+        V.utils.el('span', { className: 'vshell-tl-label' }, label),
+        V.utils.el('div', { className: 'vshell-tl-track' }),
+      ]);
+      tlRows[key] = { label: label, track: row.querySelector('.vshell-tl-track') };
+      return row;
+    }
+    function renderSegs(row, segs, dur) {
+      var track = row.track;
+      track.innerHTML = '';
+      if (!dur || !segs || !segs.length) return;
+      segs.forEach(function (r) {
+        var el = document.createElement('div');
+        el.className = 'vshell-tl-seg';
+        var s = Math.max(0, r.s), e = Math.min(dur, r.e);
+        if (e <= s + 0.05) return;
+        el.style.left = ((s / dur) * 100).toFixed(2) + '%';
+        el.style.width = Math.max(0.4, ((e - s) / dur) * 100).toFixed(2) + '%';
+        el.title = V.utils.fmtTime(s) + ' — ' + V.utils.fmtTime(e);
+        track.appendChild(el);
+      });
+    }
+    function renderCache() {
+      var track = tlRows && tlRows.cache && tlRows.cache.track;
+      if (!track) return;
+      track.innerHTML = '';
+      var dur = tlDur();
+      if (!dur || !tlVideo) return;
+      var b = tlVideo.buffered;
+      if (!b || !b.length) return;
+      var segs = [];
+      for (var i = 0; i < b.length; i++) {
+        if (b.end(i) > b.start(i)) segs.push({ s: b.start(i), e: b.end(i) });
+      }
+      renderSegs(tlRows.cache, segs, dur);
+    }
+    function renderPlayed() {
+      var track = tlRows && tlRows.played && tlRows.played.track;
+      if (!track) return;
+      track.innerHTML = '';
+      var dur = tlDur();
+      if (!dur) return;
+      renderSegs(tlRows.played, V.playHistory.get(id), dur);
+    }
+    function renderIdentified() {
+      var track = tlRows && tlRows.scan && tlRows.scan.track;
+      if (!track) return;
+      track.innerHTML = '';
+      var dur = tlDur();
+      if (!dur) return;
+      var covered = null;
+      if (tlScanDone && (V.shots.get(id) || V.shots.isScanned(id))) {
+        covered = [0, dur];                       // 快扫完成/已识别 → 整条
+      } else if (tlScanPct != null && !tlScanDone) {
+        covered = [0, (tlScanPct / 100) * dur];   // 快扫进行中 → 扫到哪画到哪
+      } else {
+        var t = tlVideo ? tlVideo.currentTime : 0;
+        covered = [0, Math.min(t, dur)];          // 仅边播分析 → 覆盖到播放位置
+      }
+      if (covered[1] > covered[0] + 0.1) renderSegs(tlRows.scan, [covered], dur);
+    }
+    function closeSeg() {
+      if (curSeg) {
+        V.playHistory.addSegment(id, curSeg.s, curSeg.e);
+        curSeg = null;
+        renderPlayed();
+      }
+    }
+    function buildTimeline() {
+      tlScanPct = null; tlScanDone = false;
+      tlEl = V.utils.el('div', { className: 'vshell-detail-timeline' }, [
+        tlRow('已缓存', 'cache'),
+        tlRow('已分镜识别', 'scan'),
+        tlRow('已播', 'played'),
+      ]);
+      tlVideo = player && player.video;
+      if (!tlVideo) return;
+      // 播放历史会话段：play/timeupdate 延伸，pause/seeked/ended 闭合落盘
+      tlOn('play', function () {
+        if (!curSeg) curSeg = { s: tlVideo.currentTime, e: tlVideo.currentTime };
+      });
+      tlOn('timeupdate', function () {
+        var t = tlVideo.currentTime;
+        if (curSeg) curSeg.e = t;
+        else if (!tlVideo.paused) curSeg = { s: t, e: t };
+        renderIdentified();                       // attach 覆盖跟随播放位置
+      });
+      tlOn('pause', closeSeg);
+      tlOn('seeked', closeSeg);
+      tlOn('ended', closeSeg);
+      tlOn('progress', renderCache);              // buffered 推进时刷新
+      renderCache();
+      renderPlayed();
+      renderIdentified();
+    }
+
     // ---- 分镜识别（shots.js）：进度条节点 + 边播分析 + 快扫 ----
     // 渲染统一读合并缓存（单一事实源）——attach/scan 任何一方产点都
     // 立即持久化到缓存，节点单调增长，杜绝「两套节点来回切」。
@@ -947,7 +1075,11 @@
           id: id, duration: pi.duration,
           container: scanWin,
           onUpdate: render,
+          // v0.6.84 时间轴：快扫进度 → 「已分镜识别」行动态增长
+          onProgress: function (pct) { tlScanPct = pct; renderIdentified(); },
           onDone: function () {
+            tlScanDone = true;
+            renderIdentified();
             hideScanProgress();
             render();
             // 全覆盖无上限（用户需求）：完成即全片节点

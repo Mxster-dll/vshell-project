@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.83
+// @version      0.6.84
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.83';
+window.VShell.version = '0.6.84';
 
 /* vshell 入口见 src/app.js */
 
@@ -3902,6 +3902,97 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   } catch (e) { /* 无 chrome.webview（纯浏览器调试）时忽略 */ }
 
   V.scrollBridge = { findScrollable: findScrollable };
+})();
+
+
+/* ===== src/core/playhistory.js ===== */
+
+/* ============================================================
+ * playhistory — 播放历史区间（v0.6.84 用户需求：详情页时间轴
+ * 「已播」行——分段记忆实际播放过的区间，跳过后之前播过的段仍显示）
+ *
+ * 存储：store 键 played.<视频id>（store 自动加 vshell. 前缀），
+ * 结构 = 升序、不重叠、已合并的区间数组 [{s, e}]（秒）。
+ * 这是用户数据（永久保留，不随缓存清理）——与分镜缓存/墙缓存不同。
+ *
+ * 区间语义：
+ *  - 只记录「实际播放过」的段（段长 >= MIN_SEG 才落盘，闪点不算）
+ *  - addSegment 与已有区间做并集合并（重叠/邻接 ≤0.5s 视为连续）
+ *  - 播放器事件驱动：play/timeupdate 延伸当前段，pause/seeked/ended
+ *    闭合当前段并入历史（调用方 detail.js 维护会话段）
+ * ============================================================ */
+(function () {
+  'use strict';
+  var V = window.VShell = window.VShell || {};
+
+  var KEY = 'played.';       // store 键前缀
+  var MIN_SEG = 0.5;         // 最小段长（秒）：不足忽略（闪点/误触不算已播）
+  var MERGE_GAP = 0.5;       // 邻接合并容差（秒）：两段间隔 <= 0.5s 视为连续
+
+  function norm(x) {
+    return { s: +x.s, e: +x.e };
+  }
+  /** 读区间（升序、不重叠；损坏数据丢弃） */
+  function get(id) {
+    if (!id) return [];
+    var v = V.store.get(KEY + id);
+    if (!Array.isArray(v) || !v.length) return [];
+    return v.map(norm)
+      .filter(function (r) { return isFinite(r.s) && isFinite(r.e) && r.e > r.s; })
+      .sort(function (a, b) { return a.s - b.s; });
+  }
+  /** 并集合并插入 [s, e]（e <= s 忽略；与重叠/邻接区间融合） */
+  function addSegment(id, s, e) {
+    if (!id) return [];
+    s = +s; e = +e;
+    if (!(isFinite(s) && isFinite(e)) || e <= s) return get(id);
+    if (e - s < MIN_SEG) return get(id);
+    var list = get(id);
+    var ins = { s: s, e: e };
+    var out = [];
+    var merged = null;
+    for (var i = 0; i < list.length; i++) {
+      var r = list[i];
+      if (r.e < ins.s - MERGE_GAP) {            // 完全在插入段之前
+        out.push(r);
+      } else if (r.s > ins.e + MERGE_GAP) {     // 完全在插入段之后
+        if (!merged) { out.push(ins); merged = true; }
+        out.push(r);
+      } else {                                   // 重叠/邻接 → 融合
+        ins = { s: Math.min(ins.s, r.s), e: Math.max(ins.e, r.e) };
+      }
+    }
+    if (!merged) out.push(ins);
+    out.sort(function (a, b) { return a.s - b.s; });
+    V.store.set(KEY + id, out);
+    return out;
+  }
+  function clear(id) {
+    if (id) V.store.del(KEY + id);
+  }
+
+  V.playHistory = {
+    get: get,
+    addSegment: addSegment,
+    clear: clear,
+    // 测试钩子（harness 用）：纯合并逻辑，不落盘
+    _merge: function (list, s, e) {
+      var tmp = (list || []).slice();
+      var r = { s: +s, e: +e };
+      var out = [];
+      var merged = false;
+      for (var i = 0; i < tmp.length; i++) {
+        var x = tmp[i];
+        if (x.e < r.s - MERGE_GAP) out.push(x);
+        else if (x.s > r.e + MERGE_GAP) {
+          if (!merged) { out.push(r); merged = true; }
+          out.push(x);
+        } else r = { s: Math.min(r.s, x.s), e: Math.max(r.e, x.e) };
+      }
+      if (!merged) out.push(r);
+      return out.sort(function (a, b) { return a.s - b.s; });
+    },
+  };
 })();
 
 
@@ -16156,9 +16247,14 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       playerCard.appendChild(player.root);
       main.appendChild(playerCard);
 
+      // v0.6.84 时间轴：播放卡底部（操作行之后、简介之前）三行区间——
+      // 已缓存（buffered）/已分镜识别（快扫或边播覆盖）/已播（播放历史分段）
+      buildTimeline();
+
       // 5. 操作行（v0.6.12 静态创建，加载中/空态也可见可用；
       // v0.6.12b：紧贴播放卡片正下方——播放卡后挂回，简介在其后）
       if (akMain) main.appendChild(akMain);
+      if (tlEl) main.appendChild(tlEl);   // v0.6.84 时间轴：操作行之后、简介之前
       refreshSaveBtns();
 
       // 6. 简介（超长折叠）
@@ -16190,6 +16286,15 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         if (shotsDetach) { try { shotsDetach(); } catch (e) { /* noop */ } shotsDetach = null; }
         if (shotsStopScan) { try { shotsStopScan(); } catch (e) { /* noop */ } shotsStopScan = null; }
         hideScanProgress();
+        // v0.6.84 时间轴清理：闭合当前播放段（持久化）+ 移除监听 + 移除 DOM
+        closeSeg();
+        if (tlOff) {
+          for (var ti = 0; ti < tlOff.length; ti++) {
+            try { tlVideo.removeEventListener(tlOff[ti][0], tlOff[ti][1]); } catch (e) { /* noop */ }
+          }
+          tlOff = [];
+        }
+        tlVideo = null; tlEl = null; tlRows = null; tlScanPct = null; tlScanDone = false;
         if (player) { try { player.destroy(); } catch (e) { /* noop */ } player = null; }
       };
     }
@@ -16304,6 +16409,120 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       setupShots(pi);
     }
 
+    // ---- v0.6.84 时间轴：播放卡底部三行区间（已缓存/已分镜识别/已播）----
+    // 每行 = label + track（.vshell-tl-seg 绝对定位区间段），只画有数据的段
+    var tlEl = null, tlRows = {}, tlVideo = null;
+    var curSeg = null;              // 当前播放会话段 {s, e}（播放中延伸，暂停/跳转闭合）
+    var tlScanPct = null;           // 快扫进度 0-100（onProgress 回调）
+    var tlScanDone = false;         // 快扫已结束（onDone）
+    var tlOff = [];                 // [ev, fn] 待移除监听
+    function tlOn(ev, fn) {
+      if (!tlVideo) return;
+      tlVideo.addEventListener(ev, fn);
+      tlOff.push([ev, fn]);
+    }
+    function tlDur() {
+      var d = tlVideo ? tlVideo.duration : 0;
+      if (isFinite(d) && d > 0) return d;
+      return (playInfo && playInfo.duration) || 0;
+    }
+    function tlRow(label, key) {
+      var row = V.utils.el('div', { className: 'vshell-tl-row' }, [
+        V.utils.el('span', { className: 'vshell-tl-label' }, label),
+        V.utils.el('div', { className: 'vshell-tl-track' }),
+      ]);
+      tlRows[key] = { label: label, track: row.querySelector('.vshell-tl-track') };
+      return row;
+    }
+    function renderSegs(row, segs, dur) {
+      var track = row.track;
+      track.innerHTML = '';
+      if (!dur || !segs || !segs.length) return;
+      segs.forEach(function (r) {
+        var el = document.createElement('div');
+        el.className = 'vshell-tl-seg';
+        var s = Math.max(0, r.s), e = Math.min(dur, r.e);
+        if (e <= s + 0.05) return;
+        el.style.left = ((s / dur) * 100).toFixed(2) + '%';
+        el.style.width = Math.max(0.4, ((e - s) / dur) * 100).toFixed(2) + '%';
+        el.title = V.utils.fmtTime(s) + ' — ' + V.utils.fmtTime(e);
+        track.appendChild(el);
+      });
+    }
+    function renderCache() {
+      var track = tlRows && tlRows.cache && tlRows.cache.track;
+      if (!track) return;
+      track.innerHTML = '';
+      var dur = tlDur();
+      if (!dur || !tlVideo) return;
+      var b = tlVideo.buffered;
+      if (!b || !b.length) return;
+      var segs = [];
+      for (var i = 0; i < b.length; i++) {
+        if (b.end(i) > b.start(i)) segs.push({ s: b.start(i), e: b.end(i) });
+      }
+      renderSegs(tlRows.cache, segs, dur);
+    }
+    function renderPlayed() {
+      var track = tlRows && tlRows.played && tlRows.played.track;
+      if (!track) return;
+      track.innerHTML = '';
+      var dur = tlDur();
+      if (!dur) return;
+      renderSegs(tlRows.played, V.playHistory.get(id), dur);
+    }
+    function renderIdentified() {
+      var track = tlRows && tlRows.scan && tlRows.scan.track;
+      if (!track) return;
+      track.innerHTML = '';
+      var dur = tlDur();
+      if (!dur) return;
+      var covered = null;
+      if (tlScanDone && (V.shots.get(id) || V.shots.isScanned(id))) {
+        covered = [0, dur];                       // 快扫完成/已识别 → 整条
+      } else if (tlScanPct != null && !tlScanDone) {
+        covered = [0, (tlScanPct / 100) * dur];   // 快扫进行中 → 扫到哪画到哪
+      } else {
+        var t = tlVideo ? tlVideo.currentTime : 0;
+        covered = [0, Math.min(t, dur)];          // 仅边播分析 → 覆盖到播放位置
+      }
+      if (covered[1] > covered[0] + 0.1) renderSegs(tlRows.scan, [covered], dur);
+    }
+    function closeSeg() {
+      if (curSeg) {
+        V.playHistory.addSegment(id, curSeg.s, curSeg.e);
+        curSeg = null;
+        renderPlayed();
+      }
+    }
+    function buildTimeline() {
+      tlScanPct = null; tlScanDone = false;
+      tlEl = V.utils.el('div', { className: 'vshell-detail-timeline' }, [
+        tlRow('已缓存', 'cache'),
+        tlRow('已分镜识别', 'scan'),
+        tlRow('已播', 'played'),
+      ]);
+      tlVideo = player && player.video;
+      if (!tlVideo) return;
+      // 播放历史会话段：play/timeupdate 延伸，pause/seeked/ended 闭合落盘
+      tlOn('play', function () {
+        if (!curSeg) curSeg = { s: tlVideo.currentTime, e: tlVideo.currentTime };
+      });
+      tlOn('timeupdate', function () {
+        var t = tlVideo.currentTime;
+        if (curSeg) curSeg.e = t;
+        else if (!tlVideo.paused) curSeg = { s: t, e: t };
+        renderIdentified();                       // attach 覆盖跟随播放位置
+      });
+      tlOn('pause', closeSeg);
+      tlOn('seeked', closeSeg);
+      tlOn('ended', closeSeg);
+      tlOn('progress', renderCache);              // buffered 推进时刷新
+      renderCache();
+      renderPlayed();
+      renderIdentified();
+    }
+
     // ---- 分镜识别（shots.js）：进度条节点 + 边播分析 + 快扫 ----
     // 渲染统一读合并缓存（单一事实源）——attach/scan 任何一方产点都
     // 立即持久化到缓存，节点单调增长，杜绝「两套节点来回切」。
@@ -16333,7 +16552,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
           id: id, duration: pi.duration,
           container: scanWin,
           onUpdate: render,
+          // v0.6.84 时间轴：快扫进度 → 「已分镜识别」行动态增长
+          onProgress: function (pct) { tlScanPct = pct; renderIdentified(); },
           onDone: function () {
+            tlScanDone = true;
+            renderIdentified();
             hideScanProgress();
             render();
             // 全覆盖无上限（用户需求）：完成即全片节点
@@ -26795,6 +27018,48 @@ body.vshell-dragging a { pointer-events: none; }
   opacity: 0.6;
   cursor: default;
 }
+/* v0.6.84 时间轴：播放卡底部三行区间（已缓存/已分镜识别/已播） */
+.vshell .vshell-detail-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 2px 0;
+  padding: 8px 10px;
+  background: var(--vscode-editorWidget-background, rgba(30, 30, 30, 0.6));
+  border: 1px solid var(--vscode-panel-border, #3c3c3c);
+  border-radius: 8px;
+}
+.vshell .vshell-tl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 14px;
+}
+.vshell .vshell-tl-label {
+  width: 62px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #9a9a9a);
+  text-align: right;
+}
+.vshell .vshell-tl-track {
+  position: relative;
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--vscode-progressBar-background, rgba(255, 255, 255, 0.08));
+  overflow: hidden;
+}
+.vshell .vshell-tl-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+}
+/* 行配色：已缓存=蓝 / 已分镜识别=紫 / 已播=绿 */
+.vshell .vshell-tl-row:nth-child(1) .vshell-tl-seg { background: var(--vscode-progressBar-background, #0e639c); }
+.vshell .vshell-tl-row:nth-child(2) .vshell-tl-seg { background: var(--vscode-terminal-ansiMagenta, #c586c0); }
+.vshell .vshell-tl-row:nth-child(3) .vshell-tl-seg { background: var(--vscode-charts-green, #89d185); }
 .vshell-detail-actions {
   display: flex;
   gap: 10px;

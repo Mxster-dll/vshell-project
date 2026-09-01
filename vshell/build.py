@@ -37,6 +37,7 @@ JS_FILES = [
     "core/cardgap.js",         # v0.5.6 用户需求：卡片间距拖动条（--vshell-card-gap）
     "core/cardsize.js",        # v0.6.69 用户需求：视频卡片大小拖动条（--vshell-card-min）
     "core/scrollbridge.js",    # v0.5.6 Flutter 壳滚轮桥（__VS_SCROLL__）
+    "core/playhistory.js",     # v0.6.84 用户需求：详情页时间轴「已播」行（分段播放历史区间）
     "core/theme.js",
     "core/localvideos.js",     # v0.5.6 第十二轮：本地视频数据源
     "core/router.js",
