@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.76
+// @version      0.6.79
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.76';
+window.VShell.version = '0.6.79';
 
 /* vshell 入口见 src/app.js */
 
@@ -3872,12 +3872,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (states) {
       var s = states.get(el);
       if (!s) {
-        s = { target: 0, pos: 0, vel: 0, raf: 0, last: 0 };
+        s = { target: 0, pos: 0, vel: 0, accel: 0, raf: 0, last: 0 };
         states.set(el, s);
       }
       return s;
     }
-    if (!el.__vsSmooth) el.__vsSmooth = { target: 0, pos: 0, vel: 0, raf: 0, last: 0 };
+    if (!el.__vsSmooth) el.__vsSmooth = { target: 0, pos: 0, vel: 0, accel: 0, raf: 0, last: 0 };
     return el.__vsSmooth;
   }
   function maxTop(el) { return Math.max(0, el.scrollHeight - el.clientHeight); }
@@ -3897,6 +3897,12 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
    *  → 无过冲，又不至于过阻尼拖慢快速滚动）。 */
   var STIFF = 120;    // 弹簧刚度 1/s²（ω=√STIFF≈11 → 95% 到位 ~270ms）
   var DAMP = 2.2 * Math.sqrt(STIFF);   // 过阻尼 ≈24.1（无过冲、速度平滑）
+  // v0.6.79 jerk 限制（加速度变化率限制）：用户反馈"滚动进行中追加一次
+  // 滚动会抖一下"——target 突变使 (target-pos) 跳变 → 弹簧力（加速度）
+  // 突变 → 位置曲线拐点。限制每帧加速度变化量 → 位置三阶连续，追加输入
+  // 时速度平滑过渡（无抖动）。JERK=120000px/s³：单格 60px 的稳态加速度
+  // 7200px/s² 需 60ms 达到——起步/追加柔和，又不迟钝。
+  var JERK = 120000;
 
   function tick(el, s, now) {
     var dt;
@@ -3905,11 +3911,17 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (!(dt > 0)) dt = 16;   // 防御：now 缺失/NaN 时按一帧计
     s.last = now;
     var dtS = dt / 1000;
-    // 1) 目标与位置之差 → 加速度（滚轮改 target 后速度随之平滑调整）
-    s.vel += (s.target - s.pos) * STIFF * dtS;
-    // 2) 阻尼：速度指数衰减（防振荡、停得干净）
+    // 1) 目标与位置之差 → 期望加速度（弹簧力）；jerk 限制：加速度平滑变化
+    var accelTarget = (s.target - s.pos) * STIFF;
+    var maxDelta = JERK * dtS;
+    var dA = accelTarget - s.accel;
+    if (dA > maxDelta) dA = maxDelta;
+    else if (dA < -maxDelta) dA = -maxDelta;
+    s.accel += dA;
+    // 2) 积分：加速度 → 速度（阻尼指数衰减）
+    s.vel += s.accel * dtS;
     s.vel *= Math.exp(-DAMP * dtS);
-    // 3) 积分：位置按速度移动
+    // 3) 积分：速度 → 位置
     s.pos += s.vel * dtS;
     el.scrollTop = s.pos;
     // 停止：接近目标即落位（消除最后几像素磨蹭）+ 速度几乎为零防振荡
@@ -3926,9 +3938,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (!el || !dy || el.scrollHeight <= el.clientHeight + 1) return false;
     var s = getState(el);
     if (!s.raf) {
-      // 动画未跑：以真实滚动位置为基准校准虚拟位置
+      // 动画未跑：以真实滚动位置为基准校准虚拟位置（加速度从 0 起步）
       s.pos = el.scrollTop;
       s.target = el.scrollTop;
+      s.accel = 0;
     }
     s.target = clampNum(s.target + dy, 0, maxTop(el));
     if (!s.raf) {
