@@ -654,8 +654,8 @@
     // feed，数据源返回顺序 + 插入序；放弃播放量降序——用户「任何视频墙都
     // 这样处理」）。feeds = { srcId: { kws: { kw: feed } } }；items = 已取到
     // 的聚合卡（按取卡顺序）；localItems = 本地视频命中关键词（置顶）。
-    var agg = { feeds: {}, items: [], localItems: [], hasMore: true, loading: false,
-      failed: false, srcRotate: 0, firstRound: true, issued: {} };
+    var agg = { feeds: {}, items: [], localItems: [], manualItems: [], hasMore: true,
+      loading: false, failed: false, srcRotate: 0, firstRound: true, issued: {} };
     // v0.6.43：代表作排重建指纹——characters.onChange 无条件调 renderMarquee，
     // 删除关键词/排除词等**无关变更**也会整排重建（innerHTML='' + 重建 mq →
     // 滚动动画重置闪动）。指纹不变时跳过重建。
@@ -919,18 +919,27 @@
 
     /** 合并列表（v0.5.6 第十五轮需求 6：本地视频置顶 + 手动添加置顶 +
      *  聚合结果；按 id 去重）——wall/feed 两模式共用。
-     *  顺序：本地（聚合里命中的）→ 手动添加 → 聚合网站结果 */
+     *  顺序：本地（聚合里命中的）→ 手动添加 → 聚合网站结果
+     *  v0.6.64 段1/段2：手动添加段 = collectManaged 收集的**手动管理表内**
+     *  当前角色视频（段1）；聚合结果 = 搜索结果剔除表内视频后（段2）。
+     *  去重键统一 dedupKeyOf（源:id 复合，防跨源同 id 误去重）。 */
     function mergedItems() {
-      var manual = V.characters.videosOf(role.name);
+      var manual = agg.manualItems || [];
       var seen = {};
-      manual.forEach(function (m) { if (m.id) seen[m.id] = true; });
+      manual.forEach(function (m) {
+        var k = dedupKeyOf(m);
+        if (k) seen[k] = true;
+      });
       // v0.6.0：本地视频已由 collectLocal 单独收集（命中关键词），置顶；
       // 聚合卡（agg.items）不再含 local 项（source-feed 只拉网络结果）
-      var local = agg.localItems.filter(function (lv) { return lv && lv.id && !seen[lv.id]; });
-      local.forEach(function (lv) { seen[lv.id] = true; });
+      var local = agg.localItems.filter(function (lv) {
+        return lv && lv.id && !seen[dedupKeyOf(lv)];
+      });
+      local.forEach(function (lv) { seen[dedupKeyOf(lv)] = true; });
       var rest = [];
       agg.items.forEach(function (it) {
-        if (!(it && it.id && seen[it.id])) rest.push(it);
+        var k = dedupKeyOf(it);
+        if (!(it && it.id && seen[k])) rest.push(it);
       });
       return local.concat(manual).concat(rest);
     }
@@ -1123,6 +1132,15 @@
                 return it && it.id && kwHit(it.title, kwsNow)
                   && !(excls && excls.length && exclHit(it.title, excls));
               });
+              // v0.6.64 段2：**剔除手动管理表内视频**（它们不再自动管理，
+              // 已由段1 单独收集展示）——filter 在网络拉取与缓存加载两路
+              // 都执行，保证搜索结果不重复出现已手动管理的视频
+              if (out.length && V.characters && V.characters.isManaged) {
+                out = out.filter(function (it) {
+                  try { return !V.characters.isManaged(it.id, id); }
+                  catch (e) { return true; }
+                });
+              }
               // v0.6.30 用户拍板：「搜索完成并筛后，为每个列表中的视频添加
               // 当前的角色」——网络拉取与缓存加载两路都补赋（跨源：a 源
               // 视频 → a 源角色，目标源无同名先建副本复制头像/背景/关键词/
@@ -1214,6 +1232,49 @@
       return Promise.all(pend);
     }
 
+    /** v0.6.64 段1：**手动管理过的视频**（manManaged 表）里搜当前角色
+     *  （videoChars 含 role.name）——这些视频不再参与自动管理，因此聚合
+     *  搜索结果（段2）要剔除表内视频，段1 单独收集展示。元数据优先取
+     *  charVideos 快照（手动赋予时存的 title/pic），缺失回退 videotable。
+     *  渲染位置：本地视频之后、聚合段2之前（mergedItems 拼接）。 */
+    function collectManaged() {
+      agg.manualItems = [];
+      var ids = [];
+      try { ids = V.multisource.activeSources(); } catch (e) { /* noop */ }
+      var snapById = {};
+      try {
+        (V.characters.videosOf(role.name) || []).forEach(function (m) {
+          if (m && m.id && !snapById[m.id]) snapById[m.id] = m;
+        });
+      } catch (e) { /* noop */ }
+      ids.forEach(function (srcId) {
+        var list = [];
+        try { list = V.characters.listManaged(srcId) || []; } catch (e) { /* noop */ }
+        list.forEach(function (vid) {
+          var hasRole = false;
+          try {
+            var ch = V.characters.getChar(vid, srcId);
+            if (Array.isArray(ch)) hasRole = ch.indexOf(role.name) >= 0;
+          } catch (e) { /* noop */ }
+          if (!hasRole) return;
+          var meta = snapById[vid] || null;
+          if (!meta) {
+            try {
+              var vt = V.store.get('videos.' + srcId) || {};
+              if (vt[vid]) meta = vt[vid];
+            } catch (e) { /* noop */ }
+          }
+          agg.manualItems.push({
+            id: vid,
+            sourceId: srcId,
+            title: (meta && meta.title) || String(vid),
+            pic: (meta && (meta.cover || meta.pic)) || '',
+            _managed: true,
+          });
+        });
+      });
+    }
+
     /** 收集本地视频（标题命中任一关键词 → 置顶；不进 source-feed） */
     function collectLocal() {
       var kws = aggKws();
@@ -1285,6 +1346,7 @@
       if (firstTime) {
         initFeeds();
         collectLocal();
+        collectManaged();   // v0.6.64 段1：手动管理表内当前角色视频
       }
       if (!Object.keys(agg.feeds).length) {
         // 无可用源/无关键词：直接空态
@@ -1366,6 +1428,7 @@
     var offLayout = V.wall ? V.wall.onLayoutChange(renderByMode) : null;
     // 角色数据变化（手动列表增减/元数据刷新）→ 重建内容区
     var offChars = V.characters ? V.characters.onChange(function () {
+      collectManaged();   // v0.6.64：手动管理表变化 → 段1 重新收集
       renderByMode();
       renderMarquee();
       renderChips();   // v0.6.46：词增删（词编辑浮窗）→ banner 关键词行同步

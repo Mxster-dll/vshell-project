@@ -43,11 +43,15 @@
   var MKEY = 'charManuals';         // v0.5.6 第五轮：{id: {name, at}} 手动指定记录
   var VIDSKEY = 'charVideos';       // v0.5.6：角色名下视频快照（角色主页）
   var FKEY = 'charFollows';         // v0.5.6 第十一轮：{roleName: true} 关注的角色
-  var RKEY = 'charRemoved';         // v0.5.6 第二十七轮：{id: true} **手动移除标记**——
-                                    // assign/resolveConflict 传 null（用户显式设为
+  var RKEY = 'charRemoved';         // v0.5.6 第二十七轮：{id: true} **手动移除标记**——                                    // assign/resolveConflict 传 null（用户显式设为
                                     // 无角色）后，charFor 不再按标题自然赋予/冲突
                                     // （否则标题命中关键词 → 移除立即"复活"）
   var LEGACY_KEY = 'tags';          // v0.5.0 前的标签键（迁移后删除）
+  var MAN_KEY = 'manManaged';       // v0.6.64：{id: true} **手动管理视频表**——
+                                    // 用户手动操作过角色的视频（手动添加/取消/
+                                    // 重置角色）入表；表内视频**不再被自动管理**
+                                    // （搜索/匹配不自动赋予角色）。角色页 =
+                                    // 表内当前角色（段1）+ 剔除表内后的自动搜索（段2）
 
   /** 数据源作用域键：v0.5.6 用户需求——角色/赋值/代表作等按数据源隔离
    *  （vshell.characters.acfun / vshell.videoChars.bilibili / ...）
@@ -62,6 +66,7 @@
   var charVideos = {};              // {roleName: [videoMeta,...]}
   var follows = {};                 // {roleName: true}（关注集合，v0.5.6 第十一轮）
   var removedIds = {};              // {id: true}（手动移除标记，v0.5.6 第二十七轮）
+  var managed = {};                 // {id: true}（v0.6.64 手动管理视频表——主源内存态）
   var listeners = [];
 
   function normalize(t) {
@@ -206,6 +211,11 @@
         removedIds = rm;
       }
     } catch (e) { /* noop */ }
+    try {
+      var mm = V.store.get(sk(MAN_KEY));
+      if (mm && typeof mm === 'object' && !Array.isArray(mm)) managed = mm;
+      else managed = {};
+    } catch (e) { /* noop */ }
   }
 
   loadAll();
@@ -226,6 +236,7 @@
       cv: V.store.scopedKey(VIDSKEY, srcId),
       fl: V.store.scopedKey(FKEY, srcId),
       rm: V.store.scopedKey(RKEY, srcId),
+      mm: V.store.scopedKey(MAN_KEY, srcId),
     };
   }
   function srcDataOf(srcId) {
@@ -233,7 +244,7 @@
     var k = srcKeys(srcId);
     var d = {
       chars: [], videoChars: {}, conflicts: {}, locks: {}, manuals: {},
-      charVideos: {}, follows: {}, removedIds: {},
+      charVideos: {}, follows: {}, removedIds: {}, managed: {},
     };
     try {
       var saved = V.store.get(k.chars);
@@ -254,6 +265,10 @@
         for (var rmi = 0; rmi < rmKeys.length; rmi++) rmObj[rmKeys[rmi]] = true;
         d.removedIds = rmObj;
       } else if (rm && typeof rm === 'object') d.removedIds = rm;
+    } catch (e) { /* noop */ }
+    try {
+      var mm = V.store.get(k.mm);
+      if (mm && typeof mm === 'object' && !Array.isArray(mm)) d.managed = mm;
     } catch (e) { /* noop */ }
     srcCache[srcId] = d;
     return d;
@@ -287,6 +302,7 @@
     return {
       chars: chars, videoChars: videoChars, conflicts: conflicts, locks: locks,
       manuals: manuals, charVideos: charVideos, follows: follows, removedIds: removedIds,
+      managed: managed,
     };
   }
   function dataOf(srcId) {
@@ -887,6 +903,7 @@
       V.store.set(k.cv, d.charVideos);
       V.store.set(k.fl, d.follows);
       V.store.set(k.rm, d.removedIds);
+      V.store.set(k.mm, d.managed);
     } catch (e) { /* noop */ }
     invalidateSrc(srcId);
   }
@@ -965,6 +982,8 @@
     if (arr && arr.length) {
       return { kind: 'char', chars: resolveChars(d, arr) };
     }
+    // v0.6.64：手动管理过的视频不自动赋予（角色只来自用户手动设置）
+    if (d.managed && d.managed[id]) return { kind: 'none' };
     // v0.6.63：true = 全视频手动移除（无任何角色）；对象 = 按角色免疫
     // （该角色已从 videoChars 移除，仅阻止重新自动赋予，不拦其他角色）
     if (d.removedIds[id] === true) return { kind: 'none' };
@@ -1039,6 +1058,9 @@
     if (!id) return [];
     var sid = srcId && srcId !== 'local' ? srcId : primaryId();
     var d = dataOf(sid);
+    // v0.6.64：手动操作过角色的视频入**手动管理表**——之后不再被自动
+    // 管理（搜索/匹配不自动赋予），角色页自动搜索把它剔除
+    d.managed[id] = true;
     var names = Array.isArray(list) ? list.filter(function (n) {
       return n && typeof n === 'string';
     }) : [];
@@ -1130,6 +1152,9 @@
     var vidSrc = (item.sourceId && item.sourceId !== 'local') ? item.sourceId : primaryId();
     var d = dataOf(vidSrc);
     ensureRoleOn(d, vidSrc, name);
+    // v0.6.64：**手动管理表**——用户手动操作过角色的视频不再自动赋予
+    // （视频级标记；取代 v0.6.63 的角色级免疫，语义更强）
+    if (d.managed[id]) return false;
     // v0.6.63：尊重手动移除标记——全视频免疫（true）或该角色免疫（对象
     // {name:true}）都不再自动赋予；原逻辑无条件清标记导致用户取消的自动
     // 角色在下次搜索/匹配时被重新加回（用户反馈「取消无效」）
@@ -1166,6 +1191,9 @@
     if (i < 0) return false;
     arr.splice(i, 1);
     if (!arr.length) delete d.videoChars[id];
+    // v0.6.64：取消自动角色 = 手动管理过 → 入表（不再被自动管理）。
+    // v0.6.63 的角色级免疫（对象）保留兼容（既有数据），新逻辑以表为准
+    d.managed[id] = true;
     var rm = d.removedIds[id];
     if (rm === true) { /* 全免疫已生效 */ }
     else if (rm && typeof rm === 'object') { rm[name] = true; }
@@ -1173,6 +1201,21 @@
     persistSrcData(sid, d);
     notify();
     return true;
+  }
+
+  /** v0.6.64：视频是否在**手动管理表**（用户手动操作过角色 → 不再自动管理） */
+  function isManaged(id, srcId) {
+    if (!id) return false;
+    var sid = srcId && srcId !== 'local' ? srcId : primaryId();
+    var d = dataOf(sid);
+    return !!(d.managed && d.managed[id]);
+  }
+
+  /** v0.6.64：手动管理表内视频 id 数组（角色页段1 数据源；按源） */
+  function listManaged(srcId) {
+    if (!srcId) return [];
+    var d = dataOf(srcId);
+    return d.managed ? Object.keys(d.managed) : [];
   }
 
   /** v0.5.6 第五轮：该视频是否有**手动**角色（manuals 名单非空；
@@ -1199,6 +1242,9 @@
     delete d.videoChars[id];
     delete d.conflicts[id];
     d.removedIds[id] = false;                    // 还原 = 允许自然重评（值标记防 dictionary 退化）
+    // v0.6.64：重置 = 手动操作过 → 入表（不再自动管理；charForOn 已检查
+    // managed → 下方自然重评对表内视频自动返回 none，不会重新赋予）
+    d.managed[id] = true;
     oldManual.forEach(function (n) { touchVideoOn(d, n, id, null, true); });   // 快照移除
     if (had && title) charForOn(d, id, title, function () {});   // 自然重评（写回自动角色）
     persistSrcData(sid, d);
@@ -1222,6 +1268,7 @@
     if (!arr || !arr.length) return false;              // 无角色 → 无需计时
     d.manuals[id] = { names: arr.slice(), at: Date.now() };
     d.locks[id] = true;
+    d.managed[id] = true;                    // v0.6.64：转手动 = 手动管理过 → 入表
     persistSrcData(sid, d);
     return true;
   }
@@ -1341,7 +1388,9 @@
     assign: assign,                       // v0.6.30：setManual 薄壳
     assignTo: assignTo,               // v0.5.7 多源：跨源 toggle 手动（缺则建副本）
     assignAuto: assignAuto,           // v0.6.30：自动赋予（搜索/批量，不写快照）
-    removeAutoChar: removeAutoChar,   // v0.6.63：取消自动角色（移除 + 按角色免疫）
+    removeAutoChar: removeAutoChar,   // v0.6.63：取消自动角色（移除 + 入手动管理表）
+    isManaged: isManaged,             // v0.6.64：视频是否手动管理过（表内）
+    listManaged: listManaged,         // v0.6.64：手动管理表内视频 id 数组（按源）
     setManual: setManual,             // v0.6.30：整体设置手动名单（弹窗提交）
     resolveConflict: resolveConflict,     // 废弃（空实现兼容）
     isManual: isManual,               // v0.5.6 第五轮：手动名单非空

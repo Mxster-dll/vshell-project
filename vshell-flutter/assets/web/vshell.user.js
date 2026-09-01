@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.63
+// @version      0.6.64
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.63';
+window.VShell.version = '0.6.64';
 
 /* vshell 入口见 src/app.js */
 
@@ -1090,11 +1090,15 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   var MKEY = 'charManuals';         // v0.5.6 第五轮：{id: {name, at}} 手动指定记录
   var VIDSKEY = 'charVideos';       // v0.5.6：角色名下视频快照（角色主页）
   var FKEY = 'charFollows';         // v0.5.6 第十一轮：{roleName: true} 关注的角色
-  var RKEY = 'charRemoved';         // v0.5.6 第二十七轮：{id: true} **手动移除标记**——
-                                    // assign/resolveConflict 传 null（用户显式设为
+  var RKEY = 'charRemoved';         // v0.5.6 第二十七轮：{id: true} **手动移除标记**——                                    // assign/resolveConflict 传 null（用户显式设为
                                     // 无角色）后，charFor 不再按标题自然赋予/冲突
                                     // （否则标题命中关键词 → 移除立即"复活"）
   var LEGACY_KEY = 'tags';          // v0.5.0 前的标签键（迁移后删除）
+  var MAN_KEY = 'manManaged';       // v0.6.64：{id: true} **手动管理视频表**——
+                                    // 用户手动操作过角色的视频（手动添加/取消/
+                                    // 重置角色）入表；表内视频**不再被自动管理**
+                                    // （搜索/匹配不自动赋予角色）。角色页 =
+                                    // 表内当前角色（段1）+ 剔除表内后的自动搜索（段2）
 
   /** 数据源作用域键：v0.5.6 用户需求——角色/赋值/代表作等按数据源隔离
    *  （vshell.characters.acfun / vshell.videoChars.bilibili / ...）
@@ -1109,6 +1113,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
   var charVideos = {};              // {roleName: [videoMeta,...]}
   var follows = {};                 // {roleName: true}（关注集合，v0.5.6 第十一轮）
   var removedIds = {};              // {id: true}（手动移除标记，v0.5.6 第二十七轮）
+  var managed = {};                 // {id: true}（v0.6.64 手动管理视频表——主源内存态）
   var listeners = [];
 
   function normalize(t) {
@@ -1253,6 +1258,11 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         removedIds = rm;
       }
     } catch (e) { /* noop */ }
+    try {
+      var mm = V.store.get(sk(MAN_KEY));
+      if (mm && typeof mm === 'object' && !Array.isArray(mm)) managed = mm;
+      else managed = {};
+    } catch (e) { /* noop */ }
   }
 
   loadAll();
@@ -1273,6 +1283,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       cv: V.store.scopedKey(VIDSKEY, srcId),
       fl: V.store.scopedKey(FKEY, srcId),
       rm: V.store.scopedKey(RKEY, srcId),
+      mm: V.store.scopedKey(MAN_KEY, srcId),
     };
   }
   function srcDataOf(srcId) {
@@ -1280,7 +1291,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var k = srcKeys(srcId);
     var d = {
       chars: [], videoChars: {}, conflicts: {}, locks: {}, manuals: {},
-      charVideos: {}, follows: {}, removedIds: {},
+      charVideos: {}, follows: {}, removedIds: {}, managed: {},
     };
     try {
       var saved = V.store.get(k.chars);
@@ -1301,6 +1312,10 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
         for (var rmi = 0; rmi < rmKeys.length; rmi++) rmObj[rmKeys[rmi]] = true;
         d.removedIds = rmObj;
       } else if (rm && typeof rm === 'object') d.removedIds = rm;
+    } catch (e) { /* noop */ }
+    try {
+      var mm = V.store.get(k.mm);
+      if (mm && typeof mm === 'object' && !Array.isArray(mm)) d.managed = mm;
     } catch (e) { /* noop */ }
     srcCache[srcId] = d;
     return d;
@@ -1334,6 +1349,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     return {
       chars: chars, videoChars: videoChars, conflicts: conflicts, locks: locks,
       manuals: manuals, charVideos: charVideos, follows: follows, removedIds: removedIds,
+      managed: managed,
     };
   }
   function dataOf(srcId) {
@@ -1934,6 +1950,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       V.store.set(k.cv, d.charVideos);
       V.store.set(k.fl, d.follows);
       V.store.set(k.rm, d.removedIds);
+      V.store.set(k.mm, d.managed);
     } catch (e) { /* noop */ }
     invalidateSrc(srcId);
   }
@@ -2012,6 +2029,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (arr && arr.length) {
       return { kind: 'char', chars: resolveChars(d, arr) };
     }
+    // v0.6.64：手动管理过的视频不自动赋予（角色只来自用户手动设置）
+    if (d.managed && d.managed[id]) return { kind: 'none' };
     // v0.6.63：true = 全视频手动移除（无任何角色）；对象 = 按角色免疫
     // （该角色已从 videoChars 移除，仅阻止重新自动赋予，不拦其他角色）
     if (d.removedIds[id] === true) return { kind: 'none' };
@@ -2086,6 +2105,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (!id) return [];
     var sid = srcId && srcId !== 'local' ? srcId : primaryId();
     var d = dataOf(sid);
+    // v0.6.64：手动操作过角色的视频入**手动管理表**——之后不再被自动
+    // 管理（搜索/匹配不自动赋予），角色页自动搜索把它剔除
+    d.managed[id] = true;
     var names = Array.isArray(list) ? list.filter(function (n) {
       return n && typeof n === 'string';
     }) : [];
@@ -2177,6 +2199,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var vidSrc = (item.sourceId && item.sourceId !== 'local') ? item.sourceId : primaryId();
     var d = dataOf(vidSrc);
     ensureRoleOn(d, vidSrc, name);
+    // v0.6.64：**手动管理表**——用户手动操作过角色的视频不再自动赋予
+    // （视频级标记；取代 v0.6.63 的角色级免疫，语义更强）
+    if (d.managed[id]) return false;
     // v0.6.63：尊重手动移除标记——全视频免疫（true）或该角色免疫（对象
     // {name:true}）都不再自动赋予；原逻辑无条件清标记导致用户取消的自动
     // 角色在下次搜索/匹配时被重新加回（用户反馈「取消无效」）
@@ -2213,6 +2238,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (i < 0) return false;
     arr.splice(i, 1);
     if (!arr.length) delete d.videoChars[id];
+    // v0.6.64：取消自动角色 = 手动管理过 → 入表（不再被自动管理）。
+    // v0.6.63 的角色级免疫（对象）保留兼容（既有数据），新逻辑以表为准
+    d.managed[id] = true;
     var rm = d.removedIds[id];
     if (rm === true) { /* 全免疫已生效 */ }
     else if (rm && typeof rm === 'object') { rm[name] = true; }
@@ -2220,6 +2248,21 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     persistSrcData(sid, d);
     notify();
     return true;
+  }
+
+  /** v0.6.64：视频是否在**手动管理表**（用户手动操作过角色 → 不再自动管理） */
+  function isManaged(id, srcId) {
+    if (!id) return false;
+    var sid = srcId && srcId !== 'local' ? srcId : primaryId();
+    var d = dataOf(sid);
+    return !!(d.managed && d.managed[id]);
+  }
+
+  /** v0.6.64：手动管理表内视频 id 数组（角色页段1 数据源；按源） */
+  function listManaged(srcId) {
+    if (!srcId) return [];
+    var d = dataOf(srcId);
+    return d.managed ? Object.keys(d.managed) : [];
   }
 
   /** v0.5.6 第五轮：该视频是否有**手动**角色（manuals 名单非空；
@@ -2246,6 +2289,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     delete d.videoChars[id];
     delete d.conflicts[id];
     d.removedIds[id] = false;                    // 还原 = 允许自然重评（值标记防 dictionary 退化）
+    // v0.6.64：重置 = 手动操作过 → 入表（不再自动管理；charForOn 已检查
+    // managed → 下方自然重评对表内视频自动返回 none，不会重新赋予）
+    d.managed[id] = true;
     oldManual.forEach(function (n) { touchVideoOn(d, n, id, null, true); });   // 快照移除
     if (had && title) charForOn(d, id, title, function () {});   // 自然重评（写回自动角色）
     persistSrcData(sid, d);
@@ -2269,6 +2315,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     if (!arr || !arr.length) return false;              // 无角色 → 无需计时
     d.manuals[id] = { names: arr.slice(), at: Date.now() };
     d.locks[id] = true;
+    d.managed[id] = true;                    // v0.6.64：转手动 = 手动管理过 → 入表
     persistSrcData(sid, d);
     return true;
   }
@@ -2388,7 +2435,9 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     assign: assign,                       // v0.6.30：setManual 薄壳
     assignTo: assignTo,               // v0.5.7 多源：跨源 toggle 手动（缺则建副本）
     assignAuto: assignAuto,           // v0.6.30：自动赋予（搜索/批量，不写快照）
-    removeAutoChar: removeAutoChar,   // v0.6.63：取消自动角色（移除 + 按角色免疫）
+    removeAutoChar: removeAutoChar,   // v0.6.63：取消自动角色（移除 + 入手动管理表）
+    isManaged: isManaged,             // v0.6.64：视频是否手动管理过（表内）
+    listManaged: listManaged,         // v0.6.64：手动管理表内视频 id 数组（按源）
     setManual: setManual,             // v0.6.30：整体设置手动名单（弹窗提交）
     resolveConflict: resolveConflict,     // 废弃（空实现兼容）
     isManual: isManual,               // v0.5.6 第五轮：手动名单非空
@@ -17987,8 +18036,8 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     // feed，数据源返回顺序 + 插入序；放弃播放量降序——用户「任何视频墙都
     // 这样处理」）。feeds = { srcId: { kws: { kw: feed } } }；items = 已取到
     // 的聚合卡（按取卡顺序）；localItems = 本地视频命中关键词（置顶）。
-    var agg = { feeds: {}, items: [], localItems: [], hasMore: true, loading: false,
-      failed: false, srcRotate: 0, firstRound: true, issued: {} };
+    var agg = { feeds: {}, items: [], localItems: [], manualItems: [], hasMore: true,
+      loading: false, failed: false, srcRotate: 0, firstRound: true, issued: {} };
     // v0.6.43：代表作排重建指纹——characters.onChange 无条件调 renderMarquee，
     // 删除关键词/排除词等**无关变更**也会整排重建（innerHTML='' + 重建 mq →
     // 滚动动画重置闪动）。指纹不变时跳过重建。
@@ -18252,18 +18301,27 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
 
     /** 合并列表（v0.5.6 第十五轮需求 6：本地视频置顶 + 手动添加置顶 +
      *  聚合结果；按 id 去重）——wall/feed 两模式共用。
-     *  顺序：本地（聚合里命中的）→ 手动添加 → 聚合网站结果 */
+     *  顺序：本地（聚合里命中的）→ 手动添加 → 聚合网站结果
+     *  v0.6.64 段1/段2：手动添加段 = collectManaged 收集的**手动管理表内**
+     *  当前角色视频（段1）；聚合结果 = 搜索结果剔除表内视频后（段2）。
+     *  去重键统一 dedupKeyOf（源:id 复合，防跨源同 id 误去重）。 */
     function mergedItems() {
-      var manual = V.characters.videosOf(role.name);
+      var manual = agg.manualItems || [];
       var seen = {};
-      manual.forEach(function (m) { if (m.id) seen[m.id] = true; });
+      manual.forEach(function (m) {
+        var k = dedupKeyOf(m);
+        if (k) seen[k] = true;
+      });
       // v0.6.0：本地视频已由 collectLocal 单独收集（命中关键词），置顶；
       // 聚合卡（agg.items）不再含 local 项（source-feed 只拉网络结果）
-      var local = agg.localItems.filter(function (lv) { return lv && lv.id && !seen[lv.id]; });
-      local.forEach(function (lv) { seen[lv.id] = true; });
+      var local = agg.localItems.filter(function (lv) {
+        return lv && lv.id && !seen[dedupKeyOf(lv)];
+      });
+      local.forEach(function (lv) { seen[dedupKeyOf(lv)] = true; });
       var rest = [];
       agg.items.forEach(function (it) {
-        if (!(it && it.id && seen[it.id])) rest.push(it);
+        var k = dedupKeyOf(it);
+        if (!(it && it.id && seen[k])) rest.push(it);
       });
       return local.concat(manual).concat(rest);
     }
@@ -18456,6 +18514,15 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
                 return it && it.id && kwHit(it.title, kwsNow)
                   && !(excls && excls.length && exclHit(it.title, excls));
               });
+              // v0.6.64 段2：**剔除手动管理表内视频**（它们不再自动管理，
+              // 已由段1 单独收集展示）——filter 在网络拉取与缓存加载两路
+              // 都执行，保证搜索结果不重复出现已手动管理的视频
+              if (out.length && V.characters && V.characters.isManaged) {
+                out = out.filter(function (it) {
+                  try { return !V.characters.isManaged(it.id, id); }
+                  catch (e) { return true; }
+                });
+              }
               // v0.6.30 用户拍板：「搜索完成并筛后，为每个列表中的视频添加
               // 当前的角色」——网络拉取与缓存加载两路都补赋（跨源：a 源
               // 视频 → a 源角色，目标源无同名先建副本复制头像/背景/关键词/
@@ -18547,6 +18614,49 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       return Promise.all(pend);
     }
 
+    /** v0.6.64 段1：**手动管理过的视频**（manManaged 表）里搜当前角色
+     *  （videoChars 含 role.name）——这些视频不再参与自动管理，因此聚合
+     *  搜索结果（段2）要剔除表内视频，段1 单独收集展示。元数据优先取
+     *  charVideos 快照（手动赋予时存的 title/pic），缺失回退 videotable。
+     *  渲染位置：本地视频之后、聚合段2之前（mergedItems 拼接）。 */
+    function collectManaged() {
+      agg.manualItems = [];
+      var ids = [];
+      try { ids = V.multisource.activeSources(); } catch (e) { /* noop */ }
+      var snapById = {};
+      try {
+        (V.characters.videosOf(role.name) || []).forEach(function (m) {
+          if (m && m.id && !snapById[m.id]) snapById[m.id] = m;
+        });
+      } catch (e) { /* noop */ }
+      ids.forEach(function (srcId) {
+        var list = [];
+        try { list = V.characters.listManaged(srcId) || []; } catch (e) { /* noop */ }
+        list.forEach(function (vid) {
+          var hasRole = false;
+          try {
+            var ch = V.characters.getChar(vid, srcId);
+            if (Array.isArray(ch)) hasRole = ch.indexOf(role.name) >= 0;
+          } catch (e) { /* noop */ }
+          if (!hasRole) return;
+          var meta = snapById[vid] || null;
+          if (!meta) {
+            try {
+              var vt = V.store.get('videos.' + srcId) || {};
+              if (vt[vid]) meta = vt[vid];
+            } catch (e) { /* noop */ }
+          }
+          agg.manualItems.push({
+            id: vid,
+            sourceId: srcId,
+            title: (meta && meta.title) || String(vid),
+            pic: (meta && (meta.cover || meta.pic)) || '',
+            _managed: true,
+          });
+        });
+      });
+    }
+
     /** 收集本地视频（标题命中任一关键词 → 置顶；不进 source-feed） */
     function collectLocal() {
       var kws = aggKws();
@@ -18618,6 +18728,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       if (firstTime) {
         initFeeds();
         collectLocal();
+        collectManaged();   // v0.6.64 段1：手动管理表内当前角色视频
       }
       if (!Object.keys(agg.feeds).length) {
         // 无可用源/无关键词：直接空态
@@ -18699,6 +18810,7 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     var offLayout = V.wall ? V.wall.onLayoutChange(renderByMode) : null;
     // 角色数据变化（手动列表增减/元数据刷新）→ 重建内容区
     var offChars = V.characters ? V.characters.onChange(function () {
+      collectManaged();   // v0.6.64：手动管理表变化 → 段1 重新收集
       renderByMode();
       renderMarquee();
       renderChips();   // v0.6.46：词增删（词编辑浮窗）→ banner 关键词行同步
