@@ -984,7 +984,7 @@
         var s = Math.max(0, r.s), e = Math.min(dur, r.e);
         if (e <= s + 0.05) return;
         el.style.left = ((s / dur) * 100).toFixed(2) + '%';
-        el.style.width = Math.max(0.8, ((e - s) / dur) * 100).toFixed(2) + '%';
+        el.style.width = Math.max(1.5, ((e - s) / dur) * 100).toFixed(2) + '%';
         el.title = V.utils.fmtTime(s) + ' — ' + V.utils.fmtTime(e);
         track.appendChild(el);
       });
