@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.88
+// @version      0.6.89
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.88';
+window.VShell.version = '0.6.89';
 
 /* vshell 入口见 src/app.js */
 
@@ -16470,13 +16470,16 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
       track.innerHTML = '';
       var dur = tlDur();
       if (!dur || !tlVideo) return;
+      // 与 player.js bufferedPct 同款：缓冲前沿 = 最后 range 末端，
+      // 画成从 0 开始的单条连续区间（卡片进度条同款视觉，随缓冲增长）
       var b = tlVideo.buffered;
-      if (!b || !b.length) return;
-      var segs = [];
-      for (var i = 0; i < b.length; i++) {
-        if (b.end(i) > b.start(i)) segs.push({ s: b.start(i), e: b.end(i) });
+      var end = 0;
+      if (b && b.length) {
+        try { end = b.end(b.length - 1); } catch (e) { end = 0; }
       }
-      renderSegs(tlRows.cache, segs, dur);
+      if (end > 0.1) {
+        renderSegs(tlRows.cache, [{ s: 0, e: Math.min(end, dur) }], dur);
+      }
     }
     function renderPlayed() {
       var track = tlRows && tlRows.played && tlRows.played.track;

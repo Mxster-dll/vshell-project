@@ -993,13 +993,16 @@
       track.innerHTML = '';
       var dur = tlDur();
       if (!dur || !tlVideo) return;
+      // 与 player.js bufferedPct 同款：缓冲前沿 = 最后 range 末端，
+      // 画成从 0 开始的单条连续区间（卡片进度条同款视觉，随缓冲增长）
       var b = tlVideo.buffered;
-      if (!b || !b.length) return;
-      var segs = [];
-      for (var i = 0; i < b.length; i++) {
-        if (b.end(i) > b.start(i)) segs.push({ s: b.start(i), e: b.end(i) });
+      var end = 0;
+      if (b && b.length) {
+        try { end = b.end(b.length - 1); } catch (e) { end = 0; }
       }
-      renderSegs(tlRows.cache, segs, dur);
+      if (end > 0.1) {
+        renderSegs(tlRows.cache, [{ s: 0, e: Math.min(end, dur) }], dur);
+      }
     }
     function renderPlayed() {
       var track = tlRows && tlRows.played && tlRows.played.track;
