@@ -965,14 +965,24 @@
     function renderSegs(row, segs, dur) {
       var track = row.track;
       track.innerHTML = '';
-      if (!dur || !segs || !segs.length) return;
+      // v0.6.88 播放位置指示线（无条件绘制——空行也画，时间轴有动态感）
+      if (dur && tlVideo) {
+        var t = tlVideo.currentTime;
+        if (isFinite(t) && t >= 0 && t <= dur) {
+          var n = document.createElement('div');
+          n.className = 'vshell-tl-now';
+          n.style.left = ((t / dur) * 100).toFixed(2) + '%';
+          track.appendChild(n);
+        }
+      }
+      if (!segs || !segs.length) return;
       segs.forEach(function (r) {
         var el = document.createElement('div');
         el.className = 'vshell-tl-seg';
         var s = Math.max(0, r.s), e = Math.min(dur, r.e);
         if (e <= s + 0.05) return;
         el.style.left = ((s / dur) * 100).toFixed(2) + '%';
-        el.style.width = Math.max(0.4, ((e - s) / dur) * 100).toFixed(2) + '%';
+        el.style.width = Math.max(0.8, ((e - s) / dur) * 100).toFixed(2) + '%';
         el.title = V.utils.fmtTime(s) + ' — ' + V.utils.fmtTime(e);
         track.appendChild(el);
       });

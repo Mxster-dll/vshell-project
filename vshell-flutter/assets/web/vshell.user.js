@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         vshell · 通用视频网站套壳 UI
 // @namespace    vshell
-// @version      0.6.87
+// @version      0.6.88
 // @description  通用视频网站套壳 UI（油猴）：整页接管 bilibili，主页/分类视频墙/详情页/待看收藏(抖音刷+墙)/下载管理(多线程+mp4box合并)，自研播放器与 Dark/Light 双主题
 // @author       vshell
 // @match        https://www.bilibili.com/*
@@ -24,7 +24,7 @@
 /* 构建版本号（与 app.html ?v=N / main.dart URL 同步，每次构建升版）——
  * 显示于导航栏左上角品牌位与设置页「关于」区 */
 window.VShell = window.VShell || {};
-window.VShell.version = '0.6.87';
+window.VShell.version = '0.6.88';
 
 /* vshell 入口见 src/app.js */
 
@@ -16442,14 +16442,24 @@ var Log=function(){var i=new Date,r=4;return{setLogLevel:function(t){r=t==this.d
     function renderSegs(row, segs, dur) {
       var track = row.track;
       track.innerHTML = '';
-      if (!dur || !segs || !segs.length) return;
+      // v0.6.88 播放位置指示线（无条件绘制——空行也画，时间轴有动态感）
+      if (dur && tlVideo) {
+        var t = tlVideo.currentTime;
+        if (isFinite(t) && t >= 0 && t <= dur) {
+          var n = document.createElement('div');
+          n.className = 'vshell-tl-now';
+          n.style.left = ((t / dur) * 100).toFixed(2) + '%';
+          track.appendChild(n);
+        }
+      }
+      if (!segs || !segs.length) return;
       segs.forEach(function (r) {
         var el = document.createElement('div');
         el.className = 'vshell-tl-seg';
         var s = Math.max(0, r.s), e = Math.min(dur, r.e);
         if (e <= s + 0.05) return;
         el.style.left = ((s / dur) * 100).toFixed(2) + '%';
-        el.style.width = Math.max(0.4, ((e - s) / dur) * 100).toFixed(2) + '%';
+        el.style.width = Math.max(0.8, ((e - s) / dur) * 100).toFixed(2) + '%';
         el.title = V.utils.fmtTime(s) + ' — ' + V.utils.fmtTime(e);
         track.appendChild(el);
       });
@@ -27089,6 +27099,19 @@ body.vshell-dragging a { pointer-events: none; }
   top: 0;
   bottom: 0;
   border-radius: 3px;
+}
+/* v0.6.88 播放位置指示线（跟随 currentTime，三行对齐） */
+.vshell .vshell-tl-now {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--vscode-foreground, #cccccc);
+  opacity: 0.75;
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 1;
 }
 /* 行配色：已缓存=蓝 / 已分镜识别=紫 / 已播=绿 */
 .vshell .vshell-tl-row:nth-child(1) .vshell-tl-seg { background: var(--vscode-progressBar-background, #0e639c); }
